@@ -30,6 +30,27 @@ Initially, all tests should fail with `NotImplementedError`s.
 To connect your implementation to the tests, complete the
 functions in [./tests/adapters.py](./tests/adapters.py).
 
+## Implementation workflow
+
+Student implementations belong in `cs336_basics/`. The tests are kept unchanged;
+`tests/adapters.py` is the small compatibility layer that imports and calls the
+student code.
+
+The tokenizer implementation currently connects these two assignment interfaces:
+
+- `get_tokenizer(...)` constructs `cs336_basics.tokenizer.BPETokenizer`.
+- `run_train_bpe(...)` calls `cs336_basics.tokenizer.train_bpe(...)`.
+
+Run the completed tokenizer section with:
+
+```sh
+uv run pytest -q tests/test_tokenizer.py tests/test_train_bpe.py
+```
+
+The same command runs in GitHub Actions for every pull request. As later sections
+are implemented, connect each new component through its adapter and add its test
+file to the workflow.
+
 ### Download data
 Download the TinyStories data and a subsample of OpenWebText
 
@@ -47,4 +68,3 @@ gunzip owt_valid.txt.gz
 
 cd ..
 ```
-
