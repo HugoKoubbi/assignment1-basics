@@ -9,7 +9,7 @@ import numpy.typing as npt
 import torch
 from torch import Tensor
 
-
+from cs336_basics.model import linear,embedding,rmsnorm,positionwise_feedforward
 
 def run_linear(
     d_in: int,
@@ -29,8 +29,14 @@ def run_linear(
     Returns:
         Float[Tensor, "... d_out"]: The transformed output of your linear module.
     """
+    linear_lay = linear(d_in, d_out)
 
-    raise NotImplementedError
+    with torch.no_grad():
+        linear_lay.W.copy_(weights)
+
+    return linear_lay(in_features)
+
+    #raise NotImplementedError
 
 
 def run_embedding(
@@ -51,8 +57,10 @@ def run_embedding(
     Returns:
         Float[Tensor, "... d_model"]: Batch of embeddings returned by your Embedding layer.
     """
-
-    raise NotImplementedError
+    embed=embedding(vocab_size,d_model)
+    with torch.no_grad():
+        embed.W.copy_(weights)
+    return embed(token_ids)
 
 
 def run_swiglu(
@@ -84,8 +92,14 @@ def run_swiglu(
     # swiglu.w1.weight.data = w1_weight
     # swiglu.w2.weight.data = w2_weight
     # swiglu.w3.weight.data = w3_weight
-    raise NotImplementedError
+    swiglu=positionwise_feedforward(d_model,d_ff)
 
+    with torch.no_grad():
+        swiglu.W_1.copy_(w1_weight)
+        swiglu.W_2.copy_(w2_weight)
+        swiglu.W_3.copy_(w3_weight)
+
+    return swiglu(in_features)
 
 def run_scaled_dot_product_attention(
     Q: Float[Tensor, " ... queries d_k"],
@@ -301,7 +315,7 @@ def run_transformer_lm(
         num_heads (int): Number of heads to use in multi-headed attention. `d_model` must be
             evenly divisible by `num_heads`.
         d_ff (int): Dimensionality of the feed-forward inner layer (section 3.3).
-        rope_theta (float): The RoPE $\Theta$ parameter.
+        rope_theta (float): The RoPE Theta parameter.
         weights (dict[str, Tensor]): 
             State dict of our reference implementation. {num_layers} refers to an
             integer between `0` and `num_layers - 1` (the layer index).
@@ -379,7 +393,13 @@ def run_rmsnorm(
         Float[Tensor,"... d_model"]: Tensor of with the same shape as `in_features` with the output of running
         RMSNorm of the `in_features`.
     """
-    raise NotImplementedError
+    rms= rmsnorm(d_model,eps,torch.empty(d_model))
+
+    with torch.no_grad():
+        rms.gain.copy_(weights)
+        rms.epsilon.copy_(eps)
+
+    return rms(in_features)
 
 
 def run_silu(in_features: Float[Tensor, " ..."]) -> Float[Tensor, " ..."]:
@@ -393,7 +413,7 @@ def run_silu(in_features: Float[Tensor, " ..."]) -> Float[Tensor, " ..."]:
         Float[Tensor,"..."]: of with the same shape as `in_features` with the output of applying
         SiLU to each element.
     """
-    raise NotImplementedError
+    return in_features * torch.sigmoid(in_features)
 
 
 def run_get_batch(
