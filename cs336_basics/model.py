@@ -115,21 +115,28 @@ class RotaryPositionalEmbedding(nn.Module):
     """
     def __init__(self,theta,d_k,max_seq_len,device=None):
         super.__init__()
+
         self.theta=theta
         self.d_k=d_k
+
         if d_k%2!=0:
             raise IndexError('The dimension should be even')
+        
         self.max_seq_len=max_seq_len
         inv_freq=1/theta**(2/d_k)
+
         self.register_buffer("M",
             torch.from_numpy(np.array([
+
             [[[np.cos(i/inv_freq**k), -np.sin(i/inv_freq**k)],
              [np.sin(i/inv_freq**k), np.cos(i/inv_freq**k)]]
+             
                 for k in range(d_k/2)
             ]
                 for i in range(max_seq_len)
                 ])),
             persistent=False)
+        
     def forward(self,x,token_positions):
         #Ici l'astuce c'est de se rendre compte qu'on peut faire le produit par bloc si on découpe le vecteur par deux. Donc pas besoin d'utiliser la matrice pleine (avec que des 0)
         x=rearrange(x,'... n (d pair) -> ... n d pair',
@@ -499,4 +506,5 @@ class transformers_lm_muP(nn.Module):
             probes=softmax(x,dim=-1)
 
             return probes
+
             
