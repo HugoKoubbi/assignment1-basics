@@ -26,7 +26,7 @@ class linear(nn.Module):
                                     b=6/(in_features+out_features))
     def forward(self,x):
 
-    #Apply x :torch.tensor(d_in) -> Wx :torch.tensor (d_out)
+    #Apply x :torch.tensor(... d_in) -> Wx :torch.tensor (d_out)
 
         return(einsum( x, self.W.T, '... d_in, d_in d_out -> ... d_out'))
 
@@ -130,7 +130,7 @@ class RotaryPositionalEmbedding(nn.Module):
 
             [[[np.cos(i/inv_freq**k), -np.sin(i/inv_freq**k)],
              [np.sin(i/inv_freq**k), np.cos(i/inv_freq**k)]]
-             
+
                 for k in range(d_k/2)
             ]
                 for i in range(max_seq_len)

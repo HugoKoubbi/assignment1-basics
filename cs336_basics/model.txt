@@ -1,0 +1,187 @@
+Configuration GPT2-XL
+
+vocab_size : 50 257
+context_length : 1024
+num_layers: 48
+d_model : 1600
+num_heads: 25
+d_ff: 4288 (closest multiple of 64 to 8/3*1600)
+
+
+How may parameters?
+
+for each layer, we have for the attention:
+4 x d_model^{2}
+
+for the MLP:
+3 d_ff x d_{model}
+
+so for each of the combinaison of layers 
+48*(4 x d_model^{2}+ 3 d_ff x d_{model})
+
+for embedding and outembedding it is 
+
+2 *(size_vocab *d_model)
+
+we can neglect the rms norm parameters, so we end up with
+
+48*(4 x d_model^{2}+ 3 d_ff x d_{model})+2 *(size_vocab *d_model)
+=1479475200
+
+in literal expressions
+-> 2L ( 3ndd_f+4nd^2+2n^2d )+ 2nVd.
+
+
+a computation shows that it is 1559475200 i.e. 1 559 475 200 parameters (1.5 billion parameters)
+
+
+The fact is that for single precision FP32=32 bits=4 bytes per parameters
+so memory in bytes=4 * N
+a computation gives 6 Gb 
+
+
+Matrix multiplies for forward pass
+
+n=seq_len
+d=d_model
+d_ff=d_ff
+
+
+Input embedding lookup
+O(n)
+For each of L blocks:
+    Q projection Q x  (d,d)(d,n) -> 2d^{2}n
+    K projection K x  (d,d)(d,n) -> 2d^{2}n
+    V projection      (d,d)(d,n) -> 2d^{2}n
+    Q–K score product (n,d)(d,n)-> 2n^{2}d
+    attention-probability–V product (n,n)(n,d) -> 2n^{2}d
+    output projection (d,d)(n,d)-> 2d^{2}n
+    W1 projection (d_ff d_model) (n d_model)-> 2 d_ff d_model n
+    W3 projection (d_model d_ff) (n d_ff)-> 2 d_ff d_model n
+    W2 projection (d_ff d_model) (n d_model)-> 2 d_ff d_model n
+
+Final vocabulary projection (vocab_size d_model) (d_model n)-> 2 vocab_size d_model n
+
+96*(3  d_ff d_model n +4*d^{2}n +2n^{2}d)+2 vocab_size d_model n
+environ 1,2*10^{12} Flops pour le premier terme
+environ 4 10^{11} pour le second terme
+environ 3,2 10^{11} pour le dernier terme
+environ 8*10^{10} pour le derniere terme avec l'embedding.
+
+
+le plus de flops vient du calcul des projections !
+
+
+## faire les pourcentages de Flops
+
+
+Si tu augmentes le context -> 1,6*10^{4}
+le terme dominant est maintenant 8*10^{13} donc le coût en Flops est donné par ça en gros
+
+
+
+
+embedding n,d_vocab x d_vocab,d_model -> 2*n*d_vocab*d_model indeed
+
+Attention layer, attention scores 
+-> 2 ( 2 * d_model^{2}* seq_len ) + 2 * seq_len^{2} * d 
+ROPE
+-> efficient 
+Values
+-> 2*d_^{2}*n
+Output
+-> 2*d^{2}*n
+
+Position_wise
+2 ( 2*d_ff*d*n )
+
+
+Les pourcentages sont les suivants
+
+GPT2-XL small -> % QK_depth:0.19536573441675534
+GPT2-XL small -> % scores_depth:0.3473168611853428
+GPT2-XL small -> % scores_ffn:0.3907314688335107
+GPT2-XL small -> % embedding:0.06658593556439123
+
+GPT2-XL medium -> % QK_depth:0.21791460001662558
+GPT2-XL medium -> % scores_depth:0.29055280002216743
+GPT2-XL medium -> % scores_ffn:0.43582920003325115
+GPT2-XL medium -> % embedding:0.055703399927955886
+
+GPT2 large -> % QK_depth:0.23412827325635122
+GPT2 large -> % scores_depth:0.24973682480677464
+GPT2 large -> % scores_ffn:0.46825654651270243
+GPT2 large -> % embedding:0.04787835542417172
+
+GPT2-XL large -> % QK_depth:0.24806527656871974
+GPT2-XL large -> % scores_depth:0.21274078118533407
+GPT2-XL large -> % scores_ffn:0.4986112059031267
+GPT2-XL large -> % embedding:0.040582736342819496
+
+QK depth augmente avec le scaling ainsi que scores_depth
+
+mais surtout c'est le feedforward qui donne le plus de parametres
+asymptotiquement, on aurait 
+
+2*3*8/3* d_{model}^{2}*n vs 4*2*d_{model}^{2}*N
+=16 d_{model}^{2}*n      vs 8 d_{model}^{2}*n
+donc asymptotiquement ça devrait donner 66 vs 33
+
+si on néglie le terme de scores_depth
+
+
+avec un contexte de 16,384
+
+GPT2-XL large with nw context-> % QK_depth:0.05918841903362991
+GPT2-XL large with nw context-> % scores_depth:0.8121598106118562
+GPT2-XL large with nw context-> % scores_ffn:0.11896872225759612
+GPT2-XL large with nw context -> % embedding:0.009683048096917769
+
+
+différents nombres de Flops
+GPT2 small-> Flops:1 187 148 988 416.0
+GPT2 medium -> Flops:1 892 102 963 200.0
+GPT2 large -> Flops:2 751 675 760 640.0
+GPT2-XL large -> Flops:4 057 935 773 696
+GPT2-XL large with nw context -> Flops:272 116 194 738 176
+
+Explose le nombre de Flops
+
+
+Observations:
+-> The scaling of the number of heads is not affecting the forward, backward Flops, and the number of parameters
+
+
+
+ADAMW accounting ressources 
+
+Optimizer state:
+m,v that have the parameters shape
+-> 2*parameters
+
+parameters:
+computation already done above
+Card(parameters)=32*(4 x d_model^{2}+ 3 d_ff x d_{model})+2 *(size_vocab *d_model)
+
+Activations:
+RMS Norm -> tensor  b n d -> bnd 
+Multi-head self-attention
+    -> QKV projections: 3* tensor b n d -> 3* bnd
+    ->  QK^{T} : tensor b h n n -> b h n^{2}
+    -> softmax : tensor b  n n -> b h n^{2}
+    -> Values averages : tensor b n d -> bnd
+    -> output_values : tensor b n d -> bnd
+Position_wise_feedforward
+    -> W1 : tensor b d_{ff} d_modle -> b d_{model} d_{ff}
+    -> W2 : tensor b n d_ff ->b n d_{ff}
+    -> SiLU: tensor b n ..
+    -> element_wise product : b n d_{ff}
+    -> W3 : tensor b n d_out
+
+
+RMS norm -> tensor b n d -> bnd
+output_embedding -> tensor b d_{model} vocab_size ->  bd_{model}vocab_size
+
+
+total Activations
+-> 2 * b * h * n**2 + 8* b * h * d + 4 * b * d * d_{ff} + b * d * vocab_size
