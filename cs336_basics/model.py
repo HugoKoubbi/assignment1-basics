@@ -17,9 +17,10 @@ class linear(nn.Module):
 
         #W: out_features x in_feature, initialized with a certain cutoff
 
-        self.W=nn.Parameter(torch.empty((out_features,in_features)),requires_grad=True)
+        self.weight=nn.Parameter(torch.empty((out_features,in_features)),requires_grad=True)
 
-        torch.nn.init.trunc_normal_(self.W,
+
+        torch.nn.init.trunc_normal_(self.weight,
                                     mean=0,
                                     std=2/(in_features+out_features), 
                                     a=-6/(in_features+out_features),
@@ -28,7 +29,7 @@ class linear(nn.Module):
 
     #Apply x :torch.tensor(... d_in) -> Wx :torch.tensor (d_out)
 
-        return(einsum( x, self.W.T, '... d_in, d_in d_out -> ... d_out'))
+        return(einsum( x, self.weight.T, '... d_in, d_in d_out -> ... d_out'))
 
 class embedding(nn.Module):
     """ 
@@ -38,16 +39,16 @@ class embedding(nn.Module):
     """
     def __init__(self, num_embeddings, embedding_dim, device=None, dtype=None):
         super().__init__()
-        self.W=nn.Parameter(torch.empty((num_embeddings,embedding_dim)),requires_grad=True)
+        self.weight=nn.Parameter(torch.empty((num_embeddings,embedding_dim)),requires_grad=True)
 
-        torch.nn.init.trunc_normal_(self.W,
+        torch.nn.init.trunc_normal_(self.weight,
                                     mean=0,
                                     std=1.,
                                     a=-1.,
                                     b=1.)
     def forward(self,tokens_ids):
     # Apply the embedding layer, cette function permet d'appliquer la fonction à chacun des tokens
-        return self.W[tokens_ids]
+        return self.weight[tokens_ids]
 
 class rmsnorm(nn.Module):
     """ 
@@ -55,11 +56,11 @@ class rmsnorm(nn.Module):
     params: epsilon: float, gain : float, d_model
     Normalize
     """
-    def __init__(self, d_model, gain, epsilon=1e-5,device=None,dtype=None):
+    def __init__(self, d_model, epsilon=1e-5,device=None,dtype=None):
         super().__init__()
         self.d_model=d_model
         self.gain=nn.Parameter(torch.empty(d_model))
-        self.epsilon=epsilon
+        self.epsilon=torch.tensor(epsilon)
 
         torch.nn.init.normal_(self.gain)
 
@@ -83,9 +84,9 @@ class positionwise_feedforward(nn.Module):
 
         super().__init__()
 
-        self.W_1=nn.Parameter(torch.empty(d_ff,d_model))
-        self.W_2=nn.Parameter(torch.empty(d_model,d_ff))
-        self.W_3=nn.Parameter(torch.empty(d_ff,d_model))
+        self.w1=nn.Parameter(torch.empty(d_ff,d_model))
+        self.w2=nn.Parameter(torch.empty(d_model,d_ff))
+        self.w3=nn.Parameter(torch.empty(d_ff,d_model))
 
         self.d_model=d_model
         self.d_ff=d_ff
@@ -96,15 +97,14 @@ class positionwise_feedforward(nn.Module):
         if (self.d_ff % 64)!=0:
             raise ValueError('d_ff is not a multiple of 64')
         
-        w_1=einsum(x,self.W_1.T,'... d_model, d_model d_ff-> ... d_ff')
+        w_1=einsum(x,self.w1.T,'... d_model, d_model d_ff-> ... d_ff')
 
         SiLU=torch.sigmoid(w_1)* w_1
-
-        w_3=einsum(x,self.W_3.T,'... d_model, d_model d_ff->... d_ff')
+        w_3=einsum(x,self.w3.T,'... d_model, d_model d_ff->... d_ff')
 
         z=w_3*SiLU
 
-        x=einsum(z,self.W_2.T,'... d_ff, d_ff d_model->... d_model')
+        x=einsum(z,self.w2.T,'... d_ff, d_ff d_model->... d_model')
         return x
 
 
@@ -114,7 +114,7 @@ class RotaryPositionalEmbedding(nn.Module):
     params: theta: float, d_k: int, max_seq_len: int
     """
     def __init__(self,theta,d_k,max_seq_len,device=None):
-        super.__init__()
+        super().__init__()
 
         self.theta=theta
         self.d_k=d_k
@@ -252,12 +252,12 @@ def scaled_dot_product_attention(key,query,values,mask):
     scores = einsum(query,key,' b ... i q , b ... j q -> b ... i j')
 
     if mask is not None:
-        masked_scores = scores.masked_fill(
+        scores = scores.masked_fill(
                         ~mask,
                         float("-inf"),
                         )    
         
-    scores = softmax(masked_scores/np.sqrt(d),dim=-1)
+    scores = softmax(scores/np.sqrt(d),dim=-1)
     output = einsum(scores,values,'b ... i j, b ... j d -> b ... i d')
 
     # à la fin, ce n'est que la matrice s_{ij}=q_{i}^{T}k_{j} 
@@ -293,7 +293,7 @@ class multihead_self_attention_dumb(nn.Module):
         self.W_v=nn.Parameter(torch.empty(num_heads * int(d_model/num_heads), d_model))
         torch.nn.init.normal_(self.W_v)
 
-        #### Here the smart idea is to biggest matrix and then slice it using einsum operations
+        #### Here the smart idea is -> consider a  biggest matrix and then slice it using einsum operations
 
     
     def forward(self, x):
@@ -304,16 +304,15 @@ class multihead_self_attention_dumb(nn.Module):
         W_k=rearrange(self.W_k,'(h d_1) d_2 -> h d_1 d_2' , h=self.num_heads)
         W_v=rearrange(self.W_v,'(h d_1) d_2 -> h d_1 d_2' , h=self.num_heads)
 
+class multihead_self_attention_wo_rope(nn.Module):
 
-
-class multihead_self_attention(nn.Module):
 
     """ 
     Parameters: num_heads: int, d_model: int, 
     Attributes: W_o: tensor , W_v, W_q, W_k
     """
 
-    def __init__(self, d_model, num_heads, max_seq_len=1024,theta=100, device=None, dtype=None):
+    def __init__(self, d_model, num_heads, max_seq_len=1024, device=None, dtype=None):
 
         super().__init__()
 
@@ -328,15 +327,71 @@ class multihead_self_attention(nn.Module):
         self.d_k=int(d_model/num_heads)
         self.d_v=int(d_model/num_heads)
     
-        self.W_o=linear(d_model, num_heads* int(d_model/num_heads))
+        self.o_proj_weight = linear(d_model, num_heads* int(d_model/num_heads))
 
-        self.W_q=linear(num_heads * int(d_model/num_heads) ,d_model )
+        self.q_proj_weight = linear(num_heads * int(d_model/num_heads) ,d_model )
 
-        self.W_k=linear(num_heads* int(d_model/num_heads) , d_model)
+        self.k_proj_weight = linear(num_heads* int(d_model/num_heads) , d_model)
 
-        self.W_v=linear(num_heads * int(d_model/num_heads), d_model)
+        self.v_proj_weight = linear(num_heads * int(d_model/num_heads), d_model)
+        self.max_seq_len=max_seq_len
+        #### Here the smart idea is to biggest matrix and then slice it using einsum operations
+    
+    def forward(self, x):
 
-        self.rope=RotaryPositionalEmbedding_gpt(theta,self.d_k,max_seq_len)
+        seq_len = self.max_seq_len
+        query = self.q_proj_weight(x)
+        key = self.k_proj_weight(x)
+        values = self.v_proj_weight(x)
+
+
+        #query = rearrange(query, '... seq_len (h d_h)  -> ... h seq_len d_h ' , h=self.num_heads)
+        #key = rearrange(key,'... seq_len (h d_h)  -> ...  h seq_len d_h' , h=self.num_heads)
+        #values=rearrange(values,'... seq_len (h d_h)  -> ...  h seq_len d_h' , h=self.num_heads)
+
+        mask=torch.tril(
+            torch.ones(seq_len, seq_len),
+            diagonal=0
+        ).bool()
+
+        attn=scaled_dot_product_attention(key,query,values,mask)
+        #attn=rearrange(attn,'...  h seq_len d_h ->... seq_len (h d_h)' , h=self.num_heads)
+        attn=self.o_proj_weight(attn)
+
+        return attn
+
+class multihead_self_attention(nn.Module):
+
+    """ 
+    Parameters: num_heads: int, d_model: int, 
+    Attributes: W_o: tensor , W_v, W_q, W_k
+    """
+
+    def __init__(self, d_model, num_heads, max_seq_len=1024, rope_theta=10000, device=None, dtype=None):
+
+        super().__init__()
+
+        self.d_model=d_model
+        self.num_heads=num_heads
+
+        if d_model % num_heads != 0:
+            raise ValueError(
+                "d_model must be divisible by num_heads"
+            )
+        
+        self.d_k=int(d_model/num_heads)
+        self.d_v=int(d_model/num_heads)
+    
+        self.o_proj_weight = linear(d_model, num_heads* int(d_model/num_heads))
+
+        self.q_proj_weight = linear(num_heads * int(d_model/num_heads) , d_model)
+
+        self.k_proj_weight = linear(num_heads* int(d_model/num_heads) , d_model)
+
+        self.v_proj_weight = linear(num_heads * int(d_model/num_heads), d_model)
+        self.rope_theta=rope_theta
+
+        self.rope=RotaryPositionalEmbedding_gpt(rope_theta,self.d_k,max_seq_len)
 
         #### Here the smart idea is to biggest matrix and then slice it using einsum operations
     
@@ -344,26 +399,9 @@ class multihead_self_attention(nn.Module):
 
         seq_len = x.shape[-2]
 
-
-        #W_q = rearrange(self.W_q,'(h d_h) d_model -> h d_h d_model' , h=self.num_heads)
-        #W_k = rearrange(self.W_k,'(h d_h) d_model -> h d_h d_model' , h=self.num_heads)
-        #W_v = rearrange(self.W_v,'(h d_h) d_model -> h d_h d_model' , h=self.num_heads)
-        #x = rearrange(x,'... seq_len (h d_h) -> ... seq_len h d_h ',
-        #               h=self.num_heads, 
-        #               d_h=self.d_model%self.num_heads 
-        #               )
-        #Compute Query,Keys
-
-        #It was dumb i just recreated the module i already created at the beginning ..
-
-        #query = einsum(x,self.W_q, '... seq_len d_model,  d_q d_model -> ... seq_len  d_q ')
-        #key = einsum(x,self.W_k, ' ... seq_len d_model, d_k d_model -> ... seq_len d_k')
-        #values = einsum(x,self.W_v,'... seq_len d_model, d_v d_model-> ... seq_len d_v')
-
-        query = self.W_q(x)
-        key = self.W_k(x)
-        values = self.W_v(x)
-
+        query = self.q_proj_weight(x)
+        key = self.k_proj_weight(x)
+        values = self.v_proj_weight(x)
 
         query = rearrange(query, '... seq_len (h d_h)  -> ... h seq_len d_h ' , h=self.num_heads)
         key = rearrange(key,'... seq_len (h d_h)  -> ...  h seq_len d_h' , h=self.num_heads)
@@ -382,23 +420,24 @@ class multihead_self_attention(nn.Module):
         mask=torch.tril(
             torch.ones(seq_len, seq_len),
             diagonal=0
-        )
+        ).bool()
 
+        print(mask)
 
-        ### pour le softmax, il faut uns queries et keys de la forme b ... n d_v, on considere les tetes comme dans le batch
+        ### pour le softmax, il faut des queries et keys de la forme b ... n d_v, on considere les tetes comme dans le batch
 
-        attn=scaled_dot_product_attention(key,query,values,mask)
+        attn=scaled_dot_product_attention(key,query,values,mask) # renvoit un vecteur  ..., num_heads, seq_len, d_head
         attn=rearrange(attn,'...  h seq_len d_h ->... seq_len (h d_h)' , h=self.num_heads)
-        attn=self.W_o(attn)
+        attn=self.o_proj_weight(attn)
 
         return attn
 
 class Transformer_block_standard(nn.Module):
-    def __init__(self,d_model,num_heads,d_ff,max_seq_len=1024):
+    def __init__(self,d_model,num_heads,d_ff,max_seq_len=1024,rope_theta=100):
 
         super().__init__()
 
-        self.attn=multihead_self_attention(d_model,num_heads,max_seq_len)
+        self.attn=multihead_self_attention(d_model,num_heads,max_seq_len,rope_theta=rope_theta)
         self.ffn=positionwise_feedforward(d_model,d_ff)
         self.rms=rmsnorm(d_model)
 
@@ -409,12 +448,12 @@ class Transformer_block_standard(nn.Module):
             h4=h2+self.ffn(h3)
             return h4
 
-class Transformers_block_residual(nn.Module):
-    def __init__(self,d_model,num_heads,d_ff,depth=32,alpha=1.):
+class Transformer_block_residual(nn.Module):
+    def __init__(self,d_model,num_heads,d_ff,max_seq_len=1024,rope_theta=100,depth=32,alpha=1.):
 
         super().__init__()
 
-        self.attn=multihead_self_attention(d_model,num_heads)
+        self.attn=multihead_self_attention(d_model,num_heads,rope_theta=rope_theta)
         self.ffn=positionwise_feedforward(d_model,d_ff)
         self.rms=rmsnorm(d_model)
 
@@ -430,9 +469,8 @@ class Transformers_block_residual(nn.Module):
             h4=h2+self.ffn(h3)*self.depth **(self.alpha)
             return h4
 
-
 class transformers_lm(nn.Module):
-    def __init__(self,vocab_size,context_length, num_layers,d_model,num_heads,d_ff):
+    def __init__(self,vocab_size,context_length, num_layers,d_model,num_heads,d_ff,rope_theta):
 
         super().__init__()
 
@@ -444,34 +482,34 @@ class transformers_lm(nn.Module):
         self.num_layers = num_layers
 
 
-        self.embed=embedding(vocab_size,d_model)
-        self.outemb=linear(d_model,vocab_size)
+        self.token_embeddings=embedding(vocab_size,d_model)
+        self.lm_head=linear(d_model,vocab_size)
 
         self.rmsnorm=rmsnorm(d_model)
+        self.ln_final=rmsnorm(d_model)
 
-
+    # Here we used Module List to have a nn.parameter that can contains a list, and then each of the layer is considered as an element of the list.
         self.layers=nn.ModuleList([ 
-        Transformer_block_standard(d_model,num_heads,d_ff,max_seq_len=context_length)
+        Transformer_block_standard(d_model,num_heads,d_ff,max_seq_len=context_length,rope_theta=rope_theta)
         for l in range(num_layers)])
 
-        def forward(self,x):
+    def forward(self,x):
 
-            x=self.embed(x)
+        x=self.token_embeddings(x)
 
-            for layer in self.layers:
-                x=layer(x)
+        for layer in self.layers:
+            x=layer(x)
 
-            x=self.rmsnorm(x)
+        x=self.ln_final(x)        
+        x=self.lm_head(x)
 
-            x=self.outemb(x)
+        probes=x
+            #probes=softmax(x,dim=-1)
 
-            probes=softmax(x,dim=-1)
-
-            return probes
+        return probes
 
 class transformers_lm_muP(nn.Module):
     def __init__(self,vocab_size,context_length, num_layers,d_model,num_heads,d_ff,alpha):
-
         super().__init__()
 
         self.d_model = d_model
@@ -480,31 +518,31 @@ class transformers_lm_muP(nn.Module):
         self.vocab_size = vocab_size
         self.context_length = context_length
         self.num_layers = num_layers
-        self.alpha=alpha
 
-        self.embed=embedding(vocab_size,d_model)
-        self.outemb=linear(d_model,vocab_size)
+
+        self.token_embeddings=embedding(vocab_size,d_model)
+        self.lm_head=linear(d_model,vocab_size)
 
         self.rmsnorm=rmsnorm(d_model)
+        self.ln_final=rmsnorm(d_model)
 
-
+    # Here we used Module List to have a nn.parameter that can contains a list, and then each of the layer is considered as an element of the list.
         self.layers=nn.ModuleList([ 
-        Transformers_block_residual(d_model,num_heads,d_ff,max_seq_len=context_length,depth=num_layers,alpha=alpha)
+        Transformer_block_residual(d_model,num_heads,d_ff,max_seq_len=context_length,depth=num_layers,alpha=alpha)
         for l in range(num_layers)])
 
-        def forward(self,x):
+    def forward(self,x):
 
-            x=self.embed(x)
+        x=self.token_embeddings(x)
 
-            for layer in self.layers:
-                x=layer(x)
+        for layer in self.layers:
+            x=layer(x)
+            
+        x=self.ln_final(x)        
+        x=self.lm_head(x)
 
-            x=self.rmsnorm(x)
+        probes=x
+            #probes=softmax(x,dim=-1)
 
-            x=self.outemb(x)
-
-            probes=softmax(x,dim=-1)
-
-            return probes
-
+        return probes
             

@@ -6,14 +6,15 @@ from collections.abc import Callable, Iterable
 from torch.utils.data import Dataset
 from typing import Optional
 import math
-from model import transformers_lm,transformers_lm_muP
-from data import data_loading,save_checkpoint,load_checkpoint
-from tokenizer import tokenizer
+from cs336_basics.tokenizer import *
 import argparse
+from cs336_basics.model import *
+from cs336_basics.train import *
+from cs336_basics.data import *
 
 def cross_entropy(logits,target):
     """ 
-    inputs: logits : tensor _ vocab_size, target: int \in [0,vocab_size-1]
+    inputs: logits : tensor _ vocab_size, target: int in [0,vocab_size-1]
     """
     logits_tilted=logits-torch.amax(logits,dim=-1,keepdim=True)
     target=rearrange(target, 'b-> b 1')
@@ -72,34 +73,34 @@ for t in range(100):
     loss.backward() # Run backward pass, which computes gradients.
     opt.step() # Run optimizer step.
 
-for lr in [1e1,1e2,1e3,1e4]:
-    weights = torch.nn.Parameter(5 * torch.randn((10, 10)))
-    opt = SGD([weights], lr)
-    for t in range(100):
-        opt.zero_grad() # Reset the gradients for all learnable parameters.
-        loss = (weights**2).mean() # Compute a scalar loss value.
-        print(f'Loss for lr={lr}: {loss.cpu().item()}')
-        loss.backward() # Run backward pass, which computes gradients.
-        opt.step() # Run optimizer step.
+#for lr in [1e1,1e2,1e3,1e4]:
+#    weights = torch.nn.Parameter(5 * torch.randn((10, 10)))
+#    opt = SGD([weights], lr)
+#    for t in range(100):
+#        opt.zero_grad() # Reset the gradients for all learnable parameters.
+#        loss = (weights**2).mean() # Compute a scalar loss value.
+#        print(f'Loss for lr={lr}: {loss.cpu().item()}')
+#        loss.backward() # Run backward pass, which computes gradients.
+#        opt.step() # Run optimizer step.
 
 
 ##### Dichotomy search for the blowing-up learning rate
-a=1000
-b=100
-for i in range(10):
-    lr=(a+b)/2
-    weights = torch.nn.Parameter(5 * torch.randn((10, 10)))
-    opt = SGD([weights], lr)
-    for t in range(20):
-        opt.zero_grad() # Reset the gradients for all learnable parameters.
-        loss = (weights**2).mean() # Compute a scalar loss value.
-        print(f'Loss for lr={lr}: {loss.cpu().item()}')
-        loss.backward() # Run backward pass, which computes gradients.
-        opt.step() # Run optimizer step.
-    if loss.cpu().item()>100:
-        a=lr
-    else:
-        b=lr
+#a=1000
+#b=100
+#for i in range(10):
+#    lr=(a+b)/2
+#    weights = torch.nn.Parameter(5 * torch.randn((10, 10)))
+#    opt = SGD([weights], lr)
+#    for t in range(20):
+#        opt.zero_grad() # Reset the gradients for all learnable parameters.
+#        loss = (weights**2).mean() # Compute a scalar loss value.
+#        print(f'Loss for lr={lr}: {loss.cpu().item()}')
+#        loss.backward() # Run backward pass, which computes gradients.
+#        opt.step() # Run optimizer step.
+#    if loss.cpu().item()>100:
+#        a=lr
+#    else:
+#        b=lr
 
 
 class adamw(torch.optim.Optimizer):
@@ -145,7 +146,7 @@ class adamw(torch.optim.Optimizer):
             for p in group["params"]:
 
                 if p.grad is None:
-                    continue
+                    break
 
                 state = self.state[p] # Get state associated with p. 
                 t = state.get("t", 1) # Get iteration number from the state, or 0.
@@ -224,7 +225,7 @@ if __name__ == '__main__':
     #Training parameters
     parser.add_argument("lr", default=1e-3,type=float)
     parser.add_argument("wd", default=1e-2,type=float)
-    parser.add_argument("betas", default=(0.9, 0.999),type=tuple)
+    parser.add_argument("betas", default=(0.99, 0.9),type=tuple)
     parser.add_argument("alpha_max", default=1e-3,type=float)
     parser.add_argument("alpha_min", default=1e-5,type=float)
     parser.add_argument("t_w",default=1000,type=int)
@@ -281,39 +282,37 @@ if __name__ == '__main__':
     tokenizer=tokenizer()
 
     # Tokenize the data
-    training_tokenized = np.save('data/' ,tokenizer.encode(training_data))
-    test_tokenized = np.save('data/',tokenizer.encode(test_data))
+    np.save('data/training_tokenized' ,tokenizer.encode(training_data))
+    np.save('data/test_tokenized',tokenizer.encode(test_data))
 
-    training_tokenized_mm=np.load('data/training_tokenized',mmap_mode='r')
-    test_tokenized_mm=np.load('data/test_tokenized',mmap_mode='r')
-
-    #creating batch_size, inputs,outputs
-    inputs_train , labels_train = data_loading(training_tokenized_mm,batch_size,context_length)
-    inputs_test , labels_test = data_loading(test_tokenized_mm,batch_size,context_length)
+    training_tokenized_mm=np.load('data/training_tokenized.npy',mmap_mode='r')
+    test_tokenized_mm=np.load('data/test_tokenized.npy',mmap_mode='r')
 
     # Initialize the transformers
     model = transformers_lm(vocab_size,context_length,num_layers,d_model,num_heads,d_ff)
-
-    model_dict=transformers_lm.state_dict
+    model_dict=model.parameters()
 
     opt = adamw(model_dict, lr=lr,betas=betas,eps=1e-5,wd=wd)
 
     for steps in range(iterations):
-        #Checkpoints for every 1000 steps
+
+    #creating batch_size, inputs,outputs
+        inputs_train , labels_train = data_loading(training_tokenized_mm,batch_size,context_length,Device)
+        inputs_test , labels_test = data_loading(test_tokenized_mm,batch_size,context_length,Device)
+
+    #Checkpoints for every 1000 steps
         if steps % 1000 == 0:
-            save_checkpoint(model, opt, steps, checkpoint_paths+f'checkpoint_{step}.pt')
+            save_checkpoint(model, opt, steps, checkpoint_paths+f'checkpoint_{steps}.pt')
         
-        #Get the actual learning rate
+    #Get the actual learning rate
         lr=learning_rate_schedule(steps, alpha_max, alpha_min, t_w, t_c)
-        for p in model.parameters:
-            if p.grad is None:
-                continue
-            p["lr"] = lr
+
+        for g in opt.param_groups:
+            g["lr"] = lr
 
         opt.zero_grad() # Reset the gradients for all learnable parameters.
 
-        output_train=model(inputs_train) # Compute the model outputs
-        loss=cross_entropy(output_train,labels_train) # Compute the cross entropy loss
+        loss=cross_entropy(model(inputs_train),labels_train) # Compute the cross entropy loss
         loss.backward() # compute the gradient
 
         gradient_clipping(model.parameters(), max_norm=max_norm) # gradient clipping
