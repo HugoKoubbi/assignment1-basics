@@ -9,7 +9,9 @@ import torch
 from jaxtyping import Bool, Float, Int
 from torch import Tensor
 
-from cs336_basics.model import linear,embedding,rmsnorm,positionwise_feedforward
+from cs336_basics.model import *
+from cs336_basics.train import *
+from cs336_basics.data import *
 
 def run_linear(
     d_in: int,
@@ -32,7 +34,7 @@ def run_linear(
     linear_lay = linear(d_in, d_out)
 
     with torch.no_grad():
-        linear_lay.W.copy_(weights)
+        linear_lay.weight.copy_(weights)
 
     return linear_lay(in_features)
 
@@ -59,7 +61,7 @@ def run_embedding(
     """
     embed=embedding(vocab_size,d_model)
     with torch.no_grad():
-        embed.W.copy_(weights)
+        embed.weight.copy_(weights)
     return embed(token_ids)
 
 
@@ -95,9 +97,9 @@ def run_swiglu(
     swiglu=positionwise_feedforward(d_model,d_ff)
 
     with torch.no_grad():
-        swiglu.W_1.copy_(w1_weight)
-        swiglu.W_2.copy_(w2_weight)
-        swiglu.W_3.copy_(w3_weight)
+        swiglu.w1.copy_(w1_weight)
+        swiglu.w2.copy_(w2_weight)
+        swiglu.w3.copy_(w3_weight)
 
     return swiglu(in_features)
 
@@ -119,7 +121,10 @@ def run_scaled_dot_product_attention(
     Returns:
         Float[Tensor, " ... queries d_v"]: Output of SDPA
     """
-    raise NotImplementedError
+
+    dot_product=scaled_dot_product_attention(K,Q,V,mask)
+
+    return dot_product
 
 
 def run_multihead_self_attention(
@@ -153,7 +158,18 @@ def run_multihead_self_attention(
         Float[Tensor, " ... sequence_length d_model"]: Tensor with the output of running your optimized, batched multi-headed attention
         implementation with the given QKV projection weights and input features.
     """
-    raise NotImplementedError
+
+    mHsa=multihead_self_attention_wo_rope(d_model,num_heads)
+
+    with torch.no_grad():
+        mHsa.o_proj_weight.weight.copy_(o_proj_weight)
+        mHsa.v_proj_weight.weight.copy_(v_proj_weight)
+        mHsa.q_proj_weight.weight.copy_(q_proj_weight)
+        mHsa.k_proj_weight.weight.copy_(k_proj_weight)
+
+    atn=mHsa(in_features)
+
+    return atn
 
 
 def run_multihead_self_attention_with_rope(
@@ -193,8 +209,17 @@ def run_multihead_self_attention_with_rope(
         Float[Tensor, " ... sequence_length d_model"]: Tensor with the output of running your optimized, batched multi-headed attention
         implementation with the given QKV projection weights and input features.
     """
-    raise NotImplementedError
+    mHsa=multihead_self_attention(d_model,num_heads,max_seq_len,rope_theta=theta)
 
+    with torch.no_grad():
+        mHsa.o_proj_weight.weight.copy_(o_proj_weight)
+        mHsa.v_proj_weight.weight.copy_(v_proj_weight)
+        mHsa.q_proj_weight.weight.copy_(q_proj_weight)
+        mHsa.k_proj_weight.weight.copy_(k_proj_weight)
+
+    atn=mHsa(in_features)
+
+    return atn
 
 def run_rope(
     d_k: int,
@@ -215,7 +240,11 @@ def run_rope(
     Returns:
         Float[Tensor, " ... sequence_length d_k"]: Tensor with RoPEd input.
     """
-    raise NotImplementedError
+    rope= RotaryPositionalEmbedding_gpt(theta,d_k,max_seq_len)
+
+    x=rope(in_query_or_key,token_positions)
+
+    return x
 
 
 def run_transformer_block(
@@ -288,7 +317,15 @@ def run_transformer_block(
         Float[Tensor, "batch sequence_length d_model"] Tensor with the output of
         running the Transformer block on the input features while using RoPE.
     """
-    raise NotImplementedError
+
+    tfblock=Transformer_block_standard(d_model,num_heads,d_ff,max_seq_len)
+
+    with torch.no_grad():
+        tfblock.load_state_dict(weights)
+
+    y=tfblock(in_features)
+
+    return y
 
 
 def run_transformer_lm(
@@ -370,9 +407,14 @@ def run_transformer_lm(
         Float[Tensor, "batch_size sequence_length vocab_size"]: Tensor with the predicted unnormalized
         next-word distribution for each token.
     """
-    raise NotImplementedError
+    tf_mdl=transformers_lm(vocab_size,context_length,num_layers,d_model,num_heads,d_ff,rope_theta=rope_theta)
 
+    with torch.no_grad():
+        tf_mdl.load_state_dict(weights)
 
+    y=tf_mdl(in_indices)
+
+    return y
 def run_rmsnorm(
     d_model: int,
     eps: float,
@@ -436,7 +478,8 @@ def run_get_batch(
         is the sampled input sequences, and the second tuple item is the corresponding
         language modeling labels.
     """
-    raise NotImplementedError
+    data=data_loading(dataset,batch_size,context_length,device)
+    return data
 
 
 def run_softmax(in_features: Float[Tensor, " ..."], dim: int) -> Float[Tensor, " ..."]:
@@ -452,7 +495,7 @@ def run_softmax(in_features: Float[Tensor, " ..."], dim: int) -> Float[Tensor, "
         Float[Tensor, "..."]: Tensor of with the same shape as `in_features` with the output of
         softmax normalizing the specified `dim`.
     """
-    raise NotImplementedError
+    sm=softmax(in_features,dim)
 
 
 def run_cross_entropy(
@@ -470,8 +513,8 @@ def run_cross_entropy(
     Returns:
         Float[Tensor, ""]: The average cross-entropy loss across examples.
     """
-    raise NotImplementedError
-
+    loss=cross_entropy(inputs,targets)
+    return loss
 
 def run_gradient_clipping(parameters: Iterable[torch.nn.Parameter], max_l2_norm: float) -> None:
     """Given a set of parameters, clip their combined gradients to have l2 norm at most max_l2_norm.
@@ -482,15 +525,15 @@ def run_gradient_clipping(parameters: Iterable[torch.nn.Parameter], max_l2_norm:
 
     The gradients of the parameters (parameter.grad) should be modified in-place.
     """
-    raise NotImplementedError
+    return gradient_clipping(parameters,max_l2_norm)
+    
 
 
 def get_adamw_cls() -> Any:
     """
     Returns a torch.optim.Optimizer that implements AdamW.
     """
-    raise NotImplementedError
-
+    return  adamw
 
 def run_get_lr_cosine_schedule(
     it: int,
@@ -517,8 +560,7 @@ def run_get_lr_cosine_schedule(
     Returns:
         Learning rate at the given iteration under the specified schedule.
     """
-    raise NotImplementedError
-
+    return learning_rate_schedule(it,max_learning_rate,min_learning_rate,warmup_iters,cosine_cycle_iters)
 
 def run_save_checkpoint(
     model: torch.nn.Module,
@@ -536,8 +578,7 @@ def run_save_checkpoint(
             we've completed.
         out (str | os.PathLike | BinaryIO | IO[bytes]): Path or file-like object to serialize the model, optimizer, and iteration to.
     """
-    raise NotImplementedError
-
+    return save_checkpoint(model,optimizer,iteration,out)
 
 def run_load_checkpoint(
     src: str | os.PathLike | BinaryIO | IO[bytes],
@@ -557,8 +598,7 @@ def run_load_checkpoint(
     Returns:
         int: the previously-serialized number of iterations.
     """
-    raise NotImplementedError
-
+    return load_checkpoint(src,model,optimizer)
 
 def get_tokenizer(
     vocab: dict[int, bytes],
