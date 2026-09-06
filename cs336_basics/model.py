@@ -423,7 +423,7 @@ class multihead_self_attention(nn.Module):
             diagonal=0
         ).bool()
 
-        print(mask)
+        #print(mask)
 
         ### pour le softmax, il faut des queries et keys de la forme b ... n d_v, on considere les tetes comme dans le batch
 

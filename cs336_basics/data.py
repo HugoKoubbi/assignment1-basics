@@ -14,8 +14,10 @@ def data_loading(x, batch_size, context_length, device):
     if n-context_length < batch_size:
         raise ValueError('the size of the input entries is not large enough')
 
-    inputs = np.array([ [x[i] for i in range(j,j+context_length)] for j in range(batch_size)])
-    outputs = np.array([ [x[i+1] for i in range(j,j+context_length)] for j in range(batch_size)])
+    bs=[np.random.randint(low=0,high=n-context_length) for i in range(batch_size)]
+
+    inputs = np.array([ [x[i] for i in range(j,j+context_length)] for j in bs])
+    outputs = np.array([ [x[i+1] for i in range(j,j+context_length)] for j in bs])
 
     inputs = torch.tensor(inputs, device=device)
     outputs = torch.tensor(outputs,device=device)
