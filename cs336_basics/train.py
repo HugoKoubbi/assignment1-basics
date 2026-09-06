@@ -6,8 +6,10 @@ from collections.abc import Callable, Iterable
 from torch.utils.data import Dataset
 from typing import Optional
 import math
-from cs336_basics.tokenizer import *
 import argparse
+
+
+from cs336_basics.tokenizer import *
 from cs336_basics.model import *
 from cs336_basics.train import *
 from cs336_basics.data import *
@@ -17,18 +19,23 @@ def cross_entropy(logits,target):
     inputs: logits : tensor _ vocab_size, target: int in [0,vocab_size-1]
     """
     logits_tilted=logits-torch.amax(logits,dim=-1,keepdim=True)
-    target=rearrange(target, 'b-> b 1')
-    logits_aux=torch.gather(logits_tilted,1,target)
+    print(logits_tilted.shape)
+    print(target.shape)
+    target=rearrange(target, '... b-> ... b 1')
+    print(target.shape)
+    print(logits_tilted.shape)
+    logits_aux=torch.gather(logits_tilted,-1,target)
 
     #Gathering tensors shaped (B,V) and (B,1) produces (B,1).
     #With dim 0, output[i,0] comes from Z[index[i,0],0].
     #With dim 1, output[i,0] comes from Z[i,index[i,0]].
-    
+    print(logits_aux.shape)
+    print(torch.sum(torch.exp(logits_tilted),dim=-1,keepdim=True).shape)
     loss=torch.mean(
-        -logits_aux+torch.log(torch.sum(torch.exp(logits_tilted),dim=-1)),
+        -logits_aux+torch.log(torch.sum(torch.exp(logits_tilted),dim=-1,keepdim=True)),
                     dim=0)
-
-    return torch.mean(loss,dim=0)
+    loss=torch.mean(loss,dim=0)
+    return loss
 
 
 class SGD(torch.optim.Optimizer):
@@ -66,12 +73,12 @@ class SGD(torch.optim.Optimizer):
 weights = torch.nn.Parameter(5 * torch.randn((10, 10)))
 opt = SGD([weights], lr=1)
 
-for t in range(100):
-    opt.zero_grad() # Reset the gradients for all learnable parameters.
-    loss = (weights**2).mean() # Compute a scalar loss value.
-    print(loss.cpu().item())
-    loss.backward() # Run backward pass, which computes gradients.
-    opt.step() # Run optimizer step.
+#for t in range(100):
+##    opt.zero_grad() # Reset the gradients for all learnable parameters.
+#    loss = (weights**2).mean() # Compute a scalar loss value.
+#    print(loss.cpu().item())
+#    loss.backward() # Run backward pass, which computes gradients.
+#    opt.step() # Run optimizer step.
 
 #for lr in [1e1,1e2,1e3,1e4]:
 #    weights = torch.nn.Parameter(5 * torch.randn((10, 10)))
@@ -223,27 +230,27 @@ if __name__ == '__main__':
 
     #Add all the hyperparameters in Parser mode
     #Training parameters
-    parser.add_argument("lr", default=1e-3,type=float)
-    parser.add_argument("wd", default=1e-2,type=float)
-    parser.add_argument("betas", default=(0.99, 0.9),type=tuple)
-    parser.add_argument("alpha_max", default=1e-3,type=float)
-    parser.add_argument("alpha_min", default=1e-5,type=float)
-    parser.add_argument("t_w",default=1000,type=int)
-    parser.add_argument("t_c",default=10000,type=int)
-    parser.add_argument("max_norm",default=10.0,type=float)
+    parser.add_argument("--lr", default=1e-3,type=float)
+    parser.add_argument("--wd", default=1e-2,type=float)
+    parser.add_argument("--betas", default=(0.99, 0.9),type=tuple)
+    parser.add_argument("--alpha_max", default=1e-3,type=float)
+    parser.add_argument("--alpha_min", default=1e-5,type=float)
+    parser.add_argument("--t_w",default=1000,type=int)
+    parser.add_argument("--t_c",default=10000,type=int)
+    parser.add_argument("--max_norm",default=10.0,type=float)
 
-    parser.add_argument("context_length", default=1024,type=int)
-    parser.add_argument("num_layers", default=12,type=int)
-    parser.add_argument("num_heads", default=12,type=int)
-    parser.add_argument("d_model", default=768,type=int)
-    parser.add_argument("d_ff", default=3072,type=int)
-    parser.add_argument("theta", default=10000,type=int)
-    parser.add_argument("vocab_size", default=50257,type=int)
+    parser.add_argument("--context_length", default=1024,type=int)
+    parser.add_argument("--num_layers", default=4,type=int)
+    parser.add_argument("--num_heads", default=2,type=int)
+    parser.add_argument("--d_model", default=100,type=int)
+    parser.add_argument("--d_ff", default=192,type=int)
+    parser.add_argument("--theta", default=10000,type=int)
+    parser.add_argument("--vocab_size", default=600,type=int)
 
-    parser.add_argument('iterations', default=100,type=int)
-    parser.add_argument('batch_size', default=2, type=int)
-    parser.add_argument('Device', default='cpu')
-    parser.add_argument("Checkpoint_paths",default='checkpoints/',type=str)
+    parser.add_argument('--iterations', default=100,type=int)
+    parser.add_argument('--batch_size', default=5, type=int)
+    parser.add_argument('--Device', default='cpu')
+    parser.add_argument("--Checkpoint_paths",default='checkpoints',type=str)
     
     args = parser.parse_args()
 
@@ -274,12 +281,18 @@ if __name__ == '__main__':
     
     # Treat the data
     # Without memmap
-    training_data = open('data/TinyStoriesV2-GPT4-train.txt','r', encoding="utf-8")
-    test_data = open('data/TinyStoriesV2-GPT4-test.txt','r', encoding="utf-8")
+    with open('data/TinyStoriesV2-GPT4-train.txt','r', encoding="utf-8") as training_data:
+        with open('data/TinyStoriesV2-GPT4-valid.txt','r', encoding="utf-8") as test_data:
+            # Prepare the tokenizer 
 
-    # Prepare the tokenizer (TBD soon)
-    vocab={ "{i}": ord(i) for i in range(256)}
-    tokenizer=tokenizer()
+            vocab,merges = train_bpe('data/TinyStories_downscaling.txt',vocab_size,['<|endoftext|>'])
+            tokenizer = BPETokenizer(vocab,merges,['<|endoftext|>'])
+
+            # Tokenize the data
+            training_data = training_data.read(50000)
+            test_data = test_data.read(5000)
+            np.save('data/training_tokenized' ,tokenizer.encode(training_data))
+            np.save('data/test_tokenized',tokenizer.encode(test_data))
 
     # Tokenize the data
     np.save('data/training_tokenized' ,tokenizer.encode(training_data))
@@ -289,10 +302,11 @@ if __name__ == '__main__':
     test_tokenized_mm=np.load('data/test_tokenized.npy',mmap_mode='r')
 
     # Initialize the transformers
-    model = transformers_lm(vocab_size,context_length,num_layers,d_model,num_heads,d_ff)
+    model = transformers_lm(vocab_size,context_length,num_layers,d_model,num_heads,d_ff,rope_theta=theta)
+    model.to(Device)
     model_dict=model.parameters()
 
-    opt = adamw(model_dict, lr=lr,betas=betas,eps=1e-5,wd=wd)
+    opt = adamw(model_dict, lr=lr,betas=betas,eps=1e-5,weight_decay=wd)
 
     for steps in range(iterations):
 
@@ -313,6 +327,7 @@ if __name__ == '__main__':
         opt.zero_grad() # Reset the gradients for all learnable parameters.
 
         loss=cross_entropy(model(inputs_train),labels_train) # Compute the cross entropy loss
+        print(f'Loss for lr={lr}: {loss.cpu().item()}')
         loss.backward() # compute the gradient
 
         gradient_clipping(model.parameters(), max_norm=max_norm) # gradient clipping
