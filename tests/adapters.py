@@ -496,6 +496,7 @@ def run_softmax(in_features: Float[Tensor, " ..."], dim: int) -> Float[Tensor, "
         softmax normalizing the specified `dim`.
     """
     sm=softmax(in_features,dim)
+    return sm
 
 
 def run_cross_entropy(
