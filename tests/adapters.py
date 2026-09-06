@@ -97,9 +97,9 @@ def run_swiglu(
     swiglu=positionwise_feedforward(d_model,d_ff)
 
     with torch.no_grad():
-        swiglu.w1.copy_(w1_weight)
-        swiglu.w2.copy_(w2_weight)
-        swiglu.w3.copy_(w3_weight)
+        swiglu.w1.weight.copy_(w1_weight)
+        swiglu.w2.weight.copy_(w2_weight)
+        swiglu.w3.weight.copy_(w3_weight)
 
     return swiglu(in_features)
 
@@ -162,10 +162,10 @@ def run_multihead_self_attention(
     mHsa=multihead_self_attention_wo_rope(d_model,num_heads)
 
     with torch.no_grad():
-        mHsa.o_proj_weight.weight.copy_(o_proj_weight)
-        mHsa.v_proj_weight.weight.copy_(v_proj_weight)
-        mHsa.q_proj_weight.weight.copy_(q_proj_weight)
-        mHsa.k_proj_weight.weight.copy_(k_proj_weight)
+        mHsa.output_proj.weight.copy_(o_proj_weight)
+        mHsa.v_proj.weight.copy_(v_proj_weight)
+        mHsa.q_proj.weight.copy_(q_proj_weight)
+        mHsa.k_proj.weight.copy_(k_proj_weight)
 
     atn=mHsa(in_features)
 
@@ -212,10 +212,10 @@ def run_multihead_self_attention_with_rope(
     mHsa=multihead_self_attention(d_model,num_heads,max_seq_len,rope_theta=theta)
 
     with torch.no_grad():
-        mHsa.o_proj_weight.weight.copy_(o_proj_weight)
-        mHsa.v_proj_weight.weight.copy_(v_proj_weight)
-        mHsa.q_proj_weight.weight.copy_(q_proj_weight)
-        mHsa.k_proj_weight.weight.copy_(k_proj_weight)
+        mHsa.output_proj.weight.copy_(o_proj_weight)
+        mHsa.v_proj.weight.copy_(v_proj_weight)
+        mHsa.q_proj.weight.copy_(q_proj_weight)
+        mHsa.k_proj.weight.copy_(k_proj_weight)
 
     atn=mHsa(in_features)
 
@@ -318,7 +318,7 @@ def run_transformer_block(
         running the Transformer block on the input features while using RoPE.
     """
 
-    tfblock=Transformer_block_standard(d_model,num_heads,d_ff,max_seq_len)
+    tfblock=Transformer_block_standard(d_model,num_heads,d_ff,max_seq_len,rope_theta=theta)
 
     with torch.no_grad():
         tfblock.load_state_dict(weights)
@@ -438,7 +438,7 @@ def run_rmsnorm(
     rms= rmsnorm(d_model,eps,torch.empty(d_model))
 
     with torch.no_grad():
-        rms.gain.copy_(weights)
+        rms.weight.copy_(weights)
         rms.epsilon.copy_(eps)
 
     return rms(in_features)

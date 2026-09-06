@@ -59,17 +59,17 @@ class rmsnorm(nn.Module):
     def __init__(self, d_model, epsilon=1e-5,device=None,dtype=None):
         super().__init__()
         self.d_model=d_model
-        self.gain=nn.Parameter(torch.empty(d_model))
+        self.weight=nn.Parameter(torch.empty(d_model))
         self.epsilon=torch.tensor(epsilon)
 
-        torch.nn.init.normal_(self.gain)
+        torch.nn.init.normal_(self.weight)
 
     def forward(self,x):
         in_dtype=x.dtype
 
         x=x.to(torch.float32)
         rms=torch.sqrt(1/self.d_model * torch.sum(x*x,dim=-1,keepdim=True)+self.epsilon)
-        res=x*self.gain/rms
+        res=x*self.weight/rms
 
         return res.to(in_dtype)
 
@@ -84,9 +84,9 @@ class positionwise_feedforward(nn.Module):
 
         super().__init__()
 
-        self.w1=nn.Parameter(torch.empty(d_ff,d_model))
-        self.w2=nn.Parameter(torch.empty(d_model,d_ff))
-        self.w3=nn.Parameter(torch.empty(d_ff,d_model))
+        self.w1=linear(d_model , d_ff)
+        self.w2=linear(d_ff,d_model)
+        self.w3=linear(d_model,d_ff)
 
         self.d_model=d_model
         self.d_ff=d_ff
@@ -97,14 +97,16 @@ class positionwise_feedforward(nn.Module):
         if (self.d_ff % 64)!=0:
             raise ValueError('d_ff is not a multiple of 64')
         
-        w_1=einsum(x,self.w1.T,'... d_model, d_model d_ff-> ... d_ff')
+        w_1=self.w1(x)
+        #einsum(x,self.w1.T,'... d_model, d_model d_ff-> ... d_ff')
 
-        SiLU=torch.sigmoid(w_1)* w_1
-        w_3=einsum(x,self.w3.T,'... d_model, d_model d_ff->... d_ff')
+        SiLU=torch.sigmoid(w_1) * w_1
+        w_3=self.w3(x)
+        #w_3=einsum(x,self.w3.T,'... d_model, d_model d_ff->... d_ff')
 
         z=w_3*SiLU
-
-        x=einsum(z,self.w2.T,'... d_ff, d_ff d_model->... d_model')
+        x=self.w2(z)
+        #x=einsum(z,self.w2.T,'... d_ff, d_ff d_model->... d_model')
         return x
 
 
@@ -327,27 +329,26 @@ class multihead_self_attention_wo_rope(nn.Module):
         self.d_k=int(d_model/num_heads)
         self.d_v=int(d_model/num_heads)
     
-        self.o_proj_weight = linear(d_model, num_heads* int(d_model/num_heads))
+        self.output_proj = linear(d_model, num_heads* int(d_model/num_heads))
+        self.q_proj = linear(num_heads * int(d_model/num_heads) ,d_model )
 
-        self.q_proj_weight = linear(num_heads * int(d_model/num_heads) ,d_model )
+        self.k_proj = linear(num_heads* int(d_model/num_heads) , d_model)
 
-        self.k_proj_weight = linear(num_heads* int(d_model/num_heads) , d_model)
-
-        self.v_proj_weight = linear(num_heads * int(d_model/num_heads), d_model)
+        self.v_proj = linear(num_heads * int(d_model/num_heads), d_model)
         self.max_seq_len=max_seq_len
         #### Here the smart idea is to biggest matrix and then slice it using einsum operations
     
     def forward(self, x):
 
-        seq_len = self.max_seq_len
-        query = self.q_proj_weight(x)
-        key = self.k_proj_weight(x)
-        values = self.v_proj_weight(x)
+        seq_len = x.shape[-2]
+        query = self.q_proj(x)
+        key = self.k_proj(x)
+        values = self.v_proj(x)
 
 
-        #query = rearrange(query, '... seq_len (h d_h)  -> ... h seq_len d_h ' , h=self.num_heads)
-        #key = rearrange(key,'... seq_len (h d_h)  -> ...  h seq_len d_h' , h=self.num_heads)
-        #values=rearrange(values,'... seq_len (h d_h)  -> ...  h seq_len d_h' , h=self.num_heads)
+        query = rearrange(query, '... seq_len (h d_h)  -> ... h seq_len d_h ' , h=self.num_heads)
+        key = rearrange(key,'... seq_len (h d_h)  -> ...  h seq_len d_h' , h=self.num_heads)
+        values=rearrange(values,'... seq_len (h d_h)  -> ...  h seq_len d_h' , h=self.num_heads)
 
         mask=torch.tril(
             torch.ones(seq_len, seq_len),
@@ -355,8 +356,8 @@ class multihead_self_attention_wo_rope(nn.Module):
         ).bool()
 
         attn=scaled_dot_product_attention(key,query,values,mask)
-        #attn=rearrange(attn,'...  h seq_len d_h ->... seq_len (h d_h)' , h=self.num_heads)
-        attn=self.o_proj_weight(attn)
+        attn=rearrange(attn,'...  h seq_len d_h ->... seq_len (h d_h)' , h=self.num_heads)
+        attn=self.output_proj(attn)
 
         return attn
 
@@ -382,13 +383,13 @@ class multihead_self_attention(nn.Module):
         self.d_k=int(d_model/num_heads)
         self.d_v=int(d_model/num_heads)
     
-        self.o_proj_weight = linear(d_model, num_heads* int(d_model/num_heads))
+        self.output_proj = linear(d_model, num_heads* int(d_model/num_heads))
 
-        self.q_proj_weight = linear(num_heads * int(d_model/num_heads) , d_model)
+        self.q_proj = linear(num_heads * int(d_model/num_heads) , d_model)
 
-        self.k_proj_weight = linear(num_heads* int(d_model/num_heads) , d_model)
+        self.k_proj = linear(num_heads* int(d_model/num_heads) , d_model)
 
-        self.v_proj_weight = linear(num_heads * int(d_model/num_heads), d_model)
+        self.v_proj = linear(num_heads * int(d_model/num_heads), d_model)
         self.rope_theta=rope_theta
 
         self.rope=RotaryPositionalEmbedding_gpt(rope_theta,self.d_k,max_seq_len)
@@ -399,9 +400,9 @@ class multihead_self_attention(nn.Module):
 
         seq_len = x.shape[-2]
 
-        query = self.q_proj_weight(x)
-        key = self.k_proj_weight(x)
-        values = self.v_proj_weight(x)
+        query = self.q_proj(x)
+        key = self.k_proj(x)
+        values = self.v_proj(x)
 
         query = rearrange(query, '... seq_len (h d_h)  -> ... h seq_len d_h ' , h=self.num_heads)
         key = rearrange(key,'... seq_len (h d_h)  -> ...  h seq_len d_h' , h=self.num_heads)
@@ -428,7 +429,7 @@ class multihead_self_attention(nn.Module):
 
         attn=scaled_dot_product_attention(key,query,values,mask) # renvoit un vecteur  ..., num_heads, seq_len, d_head
         attn=rearrange(attn,'...  h seq_len d_h ->... seq_len (h d_h)' , h=self.num_heads)
-        attn=self.o_proj_weight(attn)
+        attn=self.output_proj(attn)
 
         return attn
 
@@ -439,12 +440,13 @@ class Transformer_block_standard(nn.Module):
 
         self.attn=multihead_self_attention(d_model,num_heads,max_seq_len,rope_theta=rope_theta)
         self.ffn=positionwise_feedforward(d_model,d_ff)
-        self.rms=rmsnorm(d_model)
+        self.ln1=rmsnorm(d_model)
+        self.ln2=rmsnorm(d_model)
 
     def forward(self,x):
-            h1=self.attn(self.rms(x))
+            h1=self.attn(self.ln1(x))
             h2=x+h1
-            h3=self.rms(h2)
+            h3=self.ln2(h2)
             h4=h2+self.ffn(h3)
             return h4
 
@@ -485,7 +487,7 @@ class transformers_lm(nn.Module):
         self.token_embeddings=embedding(vocab_size,d_model)
         self.lm_head=linear(d_model,vocab_size)
 
-        self.rmsnorm=rmsnorm(d_model)
+        #self.rmsnorm=rmsnorm(d_model)
         self.ln_final=rmsnorm(d_model)
 
     # Here we used Module List to have a nn.parameter that can contains a list, and then each of the layer is considered as an element of the list.
