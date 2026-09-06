@@ -28,7 +28,7 @@ def cross_entropy(logits,target):
         -logits_aux+torch.log(torch.sum(torch.exp(logits_tilted),dim=-1)),
                     dim=0)
 
-    return loss
+    return torch.mean(loss,dim=0)
 
 
 class SGD(torch.optim.Optimizer):
@@ -104,7 +104,7 @@ for t in range(100):
 
 
 class adamw(torch.optim.Optimizer):
-    def __init__(self, params, lr=1e-3, betas=(0.99,0.9), eps=1e-5, wd=1e-2):
+    def __init__(self, params, lr=1e-3, betas=(0.99,0.9), eps=1e-5, weight_decay=1e-2):
 
         if lr<0:
             raise ValueError(f'Invalid learning rate:{lr}')
@@ -120,11 +120,11 @@ class adamw(torch.optim.Optimizer):
         if eps<=0:
             raise ValueError(f'Invalid epsilon:{eps}')
 
-        if wd<=0:
-            raise ValueError(f'Invalid epsilon:{wd}')
+        if weight_decay<=0:
+            raise ValueError(f'Invalid weight decay:{weight_decay}')
 
 
-        defaults = {"lr": lr, "beta1": beta1, "beta2": beta2, "eps": eps, "wd": wd}
+        defaults = {"lr": lr, "beta1": beta1, "beta2": beta2, "eps": eps, "weight_decay": weight_decay}
 
         super().__init__(params, defaults)
 
@@ -140,7 +140,7 @@ class adamw(torch.optim.Optimizer):
             beta1 = group["beta1"] # get the beta 1 variable
             beta2 = group["beta2"] # get the beta 2 variable
             eps = group["eps"]     # Get the epsilon variable 
-            wd = group["wd"]    # get the weight decay variable
+            wd = group["weight_decay"]    # get the weight decay variable
 
 
             for p in group["params"]:
