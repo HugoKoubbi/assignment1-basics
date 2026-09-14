@@ -19,18 +19,18 @@ def cross_entropy(logits,target):
     inputs: logits : tensor _ vocab_size, target: int in [0,vocab_size-1]
     """
     logits_tilted=logits-torch.amax(logits,dim=-1,keepdim=True)
-    print(logits_tilted.shape)
-    print(target.shape)
+    #print(logits_tilted.shape)
+    #print(target.shape)
     target=rearrange(target, '... b-> ... b 1')
-    print(target.shape)
-    print(logits_tilted.shape)
+    #print(target.shape)
+    #print(logits_tilted.shape)
     logits_aux=torch.gather(logits_tilted,-1,target)
 
     #Gathering tensors shaped (B,V) and (B,1) produces (B,1).
     #With dim 0, output[i,0] comes from Z[index[i,0],0].
     #With dim 1, output[i,0] comes from Z[i,index[i,0]].
-    print(logits_aux.shape)
-    print(torch.sum(torch.exp(logits_tilted),dim=-1,keepdim=True).shape)
+    #print(logits_aux.shape)
+    #print(torch.sum(torch.exp(logits_tilted),dim=-1,keepdim=True).shape)
     loss=torch.mean(
         -logits_aux+torch.log(torch.sum(torch.exp(logits_tilted),dim=-1,keepdim=True)),
                     dim=0)
@@ -230,11 +230,11 @@ if __name__ == '__main__':
 
     #Add all the hyperparameters in Parser mode
     #Training parameters
-    parser.add_argument("--lr", default=1e-3,type=float)
+    parser.add_argument("--lr", default=1e-2,type=float)
     parser.add_argument("--wd", default=1e-2,type=float)
     parser.add_argument("--betas", default=(0.99, 0.9),type=tuple)
-    parser.add_argument("--alpha_max", default=1e-3,type=float)
-    parser.add_argument("--alpha_min", default=1e-5,type=float)
+    parser.add_argument("--alpha_max", default=1e-2,type=float)
+    parser.add_argument("--alpha_min", default=1e-4,type=float)
     parser.add_argument("--t_w",default=1000,type=int)
     parser.add_argument("--t_c",default=10000,type=int)
     parser.add_argument("--max_norm",default=10.0,type=float)
@@ -245,9 +245,9 @@ if __name__ == '__main__':
     parser.add_argument("--d_model", default=100,type=int)
     parser.add_argument("--d_ff", default=192,type=int)
     parser.add_argument("--theta", default=10000,type=int)
-    parser.add_argument("--vocab_size", default=600,type=int)
+    parser.add_argument("--vocab_size", default=400,type=int)
 
-    parser.add_argument('--iterations', default=100,type=int)
+    parser.add_argument('--iterations', default=50,type=int)
     parser.add_argument('--batch_size', default=5, type=int)
     parser.add_argument('--Device', default='cpu')
     parser.add_argument("--Checkpoint_paths",default='checkpoints',type=str)
@@ -287,7 +287,9 @@ if __name__ == '__main__':
 
             vocab,merges = train_bpe('data/TinyStories_downscaling.txt',vocab_size,['<|endoftext|>'])
             tokenizer = BPETokenizer(vocab,merges,['<|endoftext|>'])
-
+            print(f'Vocabulary size: {len(vocab)}') 
+            print(f'Merges size: {len(merges)}')
+            print(f'Tokenizer initialized.')
             # Tokenize the data
             training_data = training_data.read(50000)
             test_data = test_data.read(5000)
@@ -333,7 +335,8 @@ if __name__ == '__main__':
         gradient_clipping(model.parameters(), max_norm=max_norm) # gradient clipping
         
         opt.step() # Run optimizer step.
-        
+
+    print(generate_text(torch.from_numpy(np.array(tokenizer.encode('I want to complete this sentence, please can i do the following'))).unsqueeze(0),model,100,0.01,0.1, 'basic' ,tokenizer))
 
         
 

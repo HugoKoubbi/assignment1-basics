@@ -2,7 +2,8 @@ import torch
 from einops import rearrange,einsum
 import torch.nn as nn
 import numpy as np
-
+from cs336_basics.tokenizer import *
+from tqdm import trange, tqdm
 
 class linear(nn.Module):
     """
@@ -547,4 +548,123 @@ class transformers_lm_muP(nn.Module):
             #probes=softmax(x,dim=-1)
 
         return probes
+
+def decoding(x, model, max_tokens, tau, threshold,type):
+    """ 
+    inputs: x batch_size seq_len 
+    max_tokens: integer 
+    tau: (temperature parameter) float
+    threshold: float (parameter for top p)
+    """
+    sentence=x
+    if type=='basic':
+        batch_size=x.shape[0]
+        finished_mask=torch.zeros(batch_size).bool()
+        sentence=x
+        s=0
+        while s< max_tokens:
+            x=sentence[..., s:]
+            #print(f'x shape{x.shape}')
+            logits=model(x) / tau
+            probabilities=softmax(logits,dim=-1)
+
+            ### slicing to get the last token probabilities with possible batch dimension
+            last_token_probabilities=probabilities[..., -1 , :]
+
+            new_token=sampling(last_token_probabilities)
+
+            tensor_updated=torch.from_numpy(np.array([ x==257 for x in new_token])).bool()
+
+   
+            finished_mask=tensor_updated+finished_mask
+
+            #if new_token == 257:
+            #    return sentence
+   
+            t=torch.where(finished_mask,257,new_token).T
+            #print(t.shape)
+            #print(sentence.shape)
+            #sentence=torch.cat([sentence, new_token.unsqueeze(0)], dim=0)
+            sentence=torch.cat([sentence, t],dim=1)
+            s+=1
+        return sentence
+    
+    elif type=='top_p':
+
+        batch_size=x.shape[0]
+        finished_mask=torch.zeros(batch_size).bool()
+        
+        while len(sentence)< max_tokens:
+
+            logits=model(sentence) / tau
+            probabilities=softmax(logits,dim=-1)
+            ### Sort the probabilities in descending order
+            probabilities_copy=sorted(descending=True)
+            vocab_size = logits.shape[-1]
+
+            for i in range(vocab_size):
+            ### Find the smallest i such that the sum of the probabilities of the first i tokens is greater than or equal to the threshold
+                index=i
+                s=probabilities_copy[...,(i+1):]
+                if torch.mean(s) >= threshold:
+                    break
+
+
+
             
+            probabilities=[x if x>=probabilities_copy[...,index] else -float(infinity) for x in probabilities]
+            new_token=sampling(probabilities)
+            sentence=torch.cat([sentence, new_token.unsqueeze(0)], dim=0)
+            if new_token == 257:
+                return sentence
+        return sentence
+        
+
+
+## Sampling function, given a probability distribution, sample a token according to the distribution
+def sampling(prob):
+    """
+    inputs: prob batch_size d_vocal 
+    output: samples batch_size sampled from the input distribution 
+    """
+    batch_size=prob.shape[0]
+    vocab_size=prob.shape[-1]
+    omega=np.random.random()
+    L=[]
+    for b in range(batch_size):
+        s=0
+        for i in range(vocab_size):
+            p=prob[b][i]
+            if s< omega <=s+p:
+                L.append([i])
+                break
+            else:
+                s+=p
+    L=np.array(L)
+    a=torch.from_numpy(L.T)
+    return(a)
+
+
+def generate_text(x, model, max_tokens, tau, threshold,type,tokenizer):
+    """ 
+    inputs: x batch_size seq_len
+    max_tokens: integer 
+    tau: (temperature parameter) float
+    threshold: float (parameter for top p)
+    """
+    sentence=decoding(x,model,max_tokens,tau,threshold,type)
+    batch_size=sentence.shape[0]
+    L=[]
+    for b in range(batch_size):
+        print(sentence[b])
+        L.append(tokenizer.decode(sentence[b].tolist()))
+    return L
+
+def generate_text_s(x, model, max_tokens, tau, threshold,type,tokenizer):
+    """ 
+    inputs: x batch_size seq_len
+    max_tokens: integer 
+    tau: (temperature parameter) float
+    threshold: float (parameter for top p)
+    """
+    return generate_text(torch.from_numpy(np.array(tokenizer.encode(x))).unsqueeze(0),model,max_tokens,tau,threshold,type)
