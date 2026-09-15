@@ -7,7 +7,8 @@ from torch.utils.data import Dataset
 from typing import Optional
 import math
 import argparse
-
+import wandb
+import tqdm
 
 from cs336_basics.tokenizer import *
 from cs336_basics.model import *
@@ -230,25 +231,24 @@ if __name__ == '__main__':
 
     #Add all the hyperparameters in Parser mode
     #Training parameters
-    parser.add_argument("--lr", default=1e-2,type=float)
+    parser.add_argument("--lr", default=1e-3,type=float)
     parser.add_argument("--wd", default=1e-2,type=float)
     parser.add_argument("--betas", default=(0.99, 0.9),type=tuple)
-    parser.add_argument("--alpha_max", default=1e-2,type=float)
+    parser.add_argument("--alpha_max", default=1e-3,type=float)
     parser.add_argument("--alpha_min", default=1e-4,type=float)
-    parser.add_argument("--t_w",default=1000,type=int)
-    parser.add_argument("--t_c",default=10000,type=int)
+    parser.add_argument("--t_w",default=100,type=int)
+    parser.add_argument("--t_c",default=1000,type=int)
     parser.add_argument("--max_norm",default=10.0,type=float)
-
-    parser.add_argument("--context_length", default=1024,type=int)
-    parser.add_argument("--num_layers", default=4,type=int)
-    parser.add_argument("--num_heads", default=2,type=int)
-    parser.add_argument("--d_model", default=100,type=int)
-    parser.add_argument("--d_ff", default=192,type=int)
+    parser.add_argument("--context_length", default=256,type=int)
+    parser.add_argument("--num_layers", default=6,type=int)
+    parser.add_argument("--num_heads", default=4,type=int)
+    parser.add_argument("--d_model", default=512,type=int)
+    parser.add_argument("--d_ff", default=1344,type=int)
     parser.add_argument("--theta", default=10000,type=int)
-    parser.add_argument("--vocab_size", default=400,type=int)
+    parser.add_argument("--vocab_size", default=10000,type=int)
 
-    parser.add_argument('--iterations', default=50,type=int)
-    parser.add_argument('--batch_size', default=5, type=int)
+    parser.add_argument('--iterations', default=1000,type=int)
+    parser.add_argument('--batch_size', default=20, type=int)
     parser.add_argument('--Device', default='cpu')
     parser.add_argument("--Checkpoint_paths",default='checkpoints',type=str)
     
@@ -278,6 +278,15 @@ if __name__ == '__main__':
     Device=args.Device
 
     checkpoint_paths=args.Checkpoint_paths
+
+    # Obtaining the device to use for training
+
+    if torch.backends.mps.is_available():
+        Device = torch.device("mps")
+    else:
+        Device = torch.device("cpu")
+
+    print("Using:", Device)
     
     # Treat the data
     # Without memmap
@@ -291,7 +300,7 @@ if __name__ == '__main__':
             print(f'Merges size: {len(merges)}')
             print(f'Tokenizer initialized.')
             # Tokenize the data
-            training_data = training_data.read(50000)
+            training_data = training_data.read(100000)
             test_data = test_data.read(5000)
             np.save('data/training_tokenized' ,tokenizer.encode(training_data))
             np.save('data/test_tokenized',tokenizer.encode(test_data))
@@ -302,6 +311,28 @@ if __name__ == '__main__':
 
     training_tokenized_mm=np.load('data/training_tokenized.npy',mmap_mode='r')
     test_tokenized_mm=np.load('data/test_tokenized.npy',mmap_mode='r')
+    run = wandb.init(
+    # Set the wandb entity where your project will be logged (generally your team name).
+        entity="koubbihugo-university-paris-dauphine",
+    # Set the wandb project where this run will be logged.
+        project="CS336-assignment",
+    # Track hyperparameters and run metadata.
+        config={
+        "learning_rate": lr,
+        "architecture": "Transformer",
+        "dataset": "TinyStories",
+        "epochs": iterations,
+        "batch_size": batch_size,
+        "context_length": context_length,
+        "num_layers": num_layers,
+        "num_heads": num_heads,
+        "d_model": d_model,
+        "d_ff": d_ff,
+        "theta": theta,
+        "vocab_size": vocab_size,
+        "max_norm": max_norm,
+        },
+    )
 
     # Initialize the transformers
     model = transformers_lm(vocab_size,context_length,num_layers,d_model,num_heads,d_ff,rope_theta=theta)
@@ -318,7 +349,10 @@ if __name__ == '__main__':
 
     #Checkpoints for every 1000 steps
         if steps % 1000 == 0:
-            save_checkpoint(model, opt, steps, checkpoint_paths+f'checkpoint_{steps}.pt')
+            checkpoint_dir = Path(checkpoint_paths)
+            checkpoint_dir.mkdir(parents=True, exist_ok=True)
+            save_checkpoint(model, opt, steps, checkpoint_dir / f"checkpoint_{steps}.pt")
+            #save_checkpoint(model, opt, steps, checkpoint_paths+f'checkpoint_{steps}.pt')
         
     #Get the actual learning rate
         lr=learning_rate_schedule(steps, alpha_max, alpha_min, t_w, t_c)
@@ -326,11 +360,22 @@ if __name__ == '__main__':
         for g in opt.param_groups:
             g["lr"] = lr
 
+
         opt.zero_grad() # Reset the gradients for all learnable parameters.
 
         loss=cross_entropy(model(inputs_train),labels_train) # Compute the cross entropy loss
-        print(f'Loss for lr={lr}: {loss.cpu().item()}')
+        acc =cross_entropy(model(inputs_test),labels_test) # Compute the cross entropy loss
+        if steps % 50 == 0:
+            print(f'Accuracy for lr={lr}: {acc.cpu().item()}')
+            print(f'Loss for lr={lr}: {loss.cpu().item()}')
+            run.log({"acc": acc, "loss": loss})
+            print(f'torch.mps.current.allocated_memory: {torch.mps.current_allocated_memory()}')
+            print(f"Recommended MPS working set: {torch.mps.current_allocated_memory():.2f} GiB")
+
         loss.backward() # compute the gradient
+
+        run.log({"Gradient norm before clipping": torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=max_norm)})
+
 
         gradient_clipping(model.parameters(), max_norm=max_norm) # gradient clipping
         

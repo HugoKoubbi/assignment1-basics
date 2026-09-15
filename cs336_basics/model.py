@@ -420,7 +420,7 @@ class multihead_self_attention(nn.Module):
 
 
         mask=torch.tril(
-            torch.ones(seq_len, seq_len),
+            torch.ones(seq_len, seq_len,device=x.device),
             diagonal=0
         ).bool()
 
