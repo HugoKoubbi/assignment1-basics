@@ -557,7 +557,7 @@ class MoeLayer(nn.Module):
     """
     Mistral implementation of MoEs
     """
-    def __init__(self, experts: List[nn.Module], gate: nn.Module, moe_args: MoeArgs):
+    def __init__(self, experts: List[nn.Module], gate: nn.Module, moe_args):
         super().__init__()
         assert len(experts) > 0
         self.experts = nn.ModuleList(experts)
