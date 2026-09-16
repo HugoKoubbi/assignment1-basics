@@ -239,17 +239,17 @@ if __name__ == '__main__':
     parser.add_argument("--t_w",default=100,type=int)
     parser.add_argument("--t_c",default=1000,type=int)
     parser.add_argument("--max_norm",default=10.0,type=float)
-    parser.add_argument("--context_length", default=256,type=int)
-    parser.add_argument("--num_layers", default=6,type=int)
-    parser.add_argument("--num_heads", default=4,type=int)
+    parser.add_argument("--context_length", default=128,type=int)
+    parser.add_argument("--num_layers", default=12,type=int)
+    parser.add_argument("--num_heads", default=8,type=int)
     parser.add_argument("--d_model", default=512,type=int)
     parser.add_argument("--d_ff", default=1344,type=int)
     parser.add_argument("--theta", default=10000,type=int)
     parser.add_argument("--vocab_size", default=10000,type=int)
 
-    parser.add_argument('--iterations', default=1000,type=int)
-    parser.add_argument('--batch_size', default=20, type=int)
-    parser.add_argument('--Device', default='cpu')
+    parser.add_argument('--iterations', default=5000,type=int)
+    parser.add_argument('--batch_size', default=80, type=int)
+    parser.add_argument('--Device', default='mps')
     parser.add_argument("--Checkpoint_paths",default='checkpoints',type=str)
     
     args = parser.parse_args()
@@ -300,7 +300,7 @@ if __name__ == '__main__':
             print(f'Merges size: {len(merges)}')
             print(f'Tokenizer initialized.')
             # Tokenize the data
-            training_data = training_data.read(100000)
+            training_data = training_data.read(500000)
             test_data = test_data.read(5000)
             np.save('data/training_tokenized' ,tokenizer.encode(training_data))
             np.save('data/test_tokenized',tokenizer.encode(test_data))
@@ -370,8 +370,10 @@ if __name__ == '__main__':
             print(f'Loss for lr={lr}: {loss.cpu().item()}')
             run.log({"acc": acc, "loss": loss})
             print(f'torch.mps.current.allocated_memory: {torch.mps.current_allocated_memory()}')
-            print(f"Recommended MPS working set: {torch.mps.current_allocated_memory():.2f} GiB")
-
+            current_allocated_memory = torch.mps.current_allocated_memory() / (1024**3)
+            print(f"torch_current_memory: {current_allocated_memory:.2f} GiB")
+            recommended_gib = torch.mps.recommended_max_memory() / (1024**3)
+            print(f"Recommended MPS working set: {recommended_gib:.2f} GiB")
         loss.backward() # compute the gradient
 
         run.log({"Gradient norm before clipping": torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=max_norm)})
