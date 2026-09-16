@@ -551,18 +551,75 @@ class transformers_lm_muP(nn.Module):
             #probes=softmax(x,dim=-1)
 
         return probes
+    
+class transformer_block_moe(nn.Module):
+    def __init__(self,d_model,num_heads,num_experts,d_ff,max_seq_len=1024,rope_theta=100):
+        super().__init__()
+        self.gate = linear(d_model, num_experts)
+        self.attn = multihead_self_attention(d_model,num_heads,max_seq_len,rope_theta=rope_theta)
+        self.experts = nn.ModuleList([
+            positionwise_feedforward(d_model, d_ff)
+            for _ in range(num_experts)
+        ])
+        self.moe = MoeLayer(self.experts, self.gate)
+        self.ln1 = rmsnorm(d_model)
+        self.ln2 = rmsnorm(d_model)
 
+    def forward(self,x):
+            h1=self.attn(self.ln1(x))
+            h2=x+h1
+            h3=self.ln2(h2)
+            h4=h2+self.moe(h3)
+            return h4        
+
+class transformers_lm_Moe(nn.Module):
+    def __init__(self,vocab_size,context_length, num_layers,d_model,num_heads,d_ff,alpha):
+
+        super().__init__()
+ 
+        self.d_model = d_model
+        self.num_heads = num_heads
+        self.d_ff = d_ff
+        self.vocab_size = vocab_size
+        self.context_length = context_length
+        self.num_layers = num_layers
+ 
+ 
+        self.token_embeddings=embedding(vocab_size,d_model)
+        self.lm_head=linear(d_model,vocab_size)
+ 
+        self.rmsnorm=rmsnorm(d_model)
+        self.ln_final=rmsnorm(d_model)
+ 
+     # Here we used Module List to have a nn.parameter that can contains a list, and then each of the layer is considered as an element of the list.
+        self.layers=nn.ModuleList([ 
+        transformer_block_moe(d_model,num_heads,d_ff,max_seq_len=context_length,depth=num_layers,alpha=alpha)
+         for l in range(num_layers)])
+ 
+    def forward(self,x):
+ 
+        x=self.token_embeddings(x)
+ 
+        for layer in self.layers:
+            x=layer(x)
+             
+        x=self.ln_final(x)        
+        x=self.lm_head(x)
+ 
+        probes=x
+             #probes=softmax(x,dim=-1)
+ 
+        return probes   
 
 class MoeLayer(nn.Module):
     """
     Mistral implementation of MoEs
     """
-    def __init__(self, experts: List[nn.Module], gate: nn.Module, moe_args):
+    def __init__(self, experts: List[nn.Module], gate: nn.Module):
         super().__init__()
         assert len(experts) > 0
         self.experts = nn.ModuleList(experts)
         self.gate = gate
-        self.args = moe_args
 
     def forward(self, inputs: torch.Tensor) -> torch.Tensor:
         gate_logits = self.gate(inputs)
