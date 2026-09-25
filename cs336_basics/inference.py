@@ -22,17 +22,17 @@ if __name__ == '__main__':
     parser.add_argument("--t_w",default=100,type=int)
     parser.add_argument("--t_c",default=1000,type=int)
     parser.add_argument("--max_norm",default=10.0,type=float)
-    parser.add_argument("--context_length", default=256,type=int)
-    parser.add_argument("--num_layers", default=6,type=int)
-    parser.add_argument("--num_heads", default=4,type=int)
+    parser.add_argument("--context_length", default=128,type=int)
+    parser.add_argument("--num_layers", default=12,type=int)
+    parser.add_argument("--num_heads", default=8,type=int)
     parser.add_argument("--d_model", default=512,type=int)
     parser.add_argument("--d_ff", default=1344,type=int)
     parser.add_argument("--theta", default=10000,type=int)
     parser.add_argument("--vocab_size", default=10000,type=int)
 
     parser.add_argument('--iterations', default=5000,type=int)
-    parser.add_argument('--batch_size', default=10, type=int)
-    parser.add_argument('--Device', default='cpu')
+    parser.add_argument('--batch_size', default=40, type=int)
+    parser.add_argument('--Device', default='mps')
     parser.add_argument("--Checkpoint_paths",default='checkpoints',type=str)
     
     args = parser.parse_args()
@@ -87,9 +87,17 @@ if __name__ == '__main__':
     model_dict=model.parameters()
     opt = adamw(model_dict, lr=lr,betas=betas,eps=1e-5,weight_decay=wd)
 
-    load_checkpoint('/Users/hugokoubbi/Developer/assignment1-basics/ checkpoints/run_15_09/checkpointscheckpoint_2000.pt', model, opt)
+    load_checkpoint('checkpoints/checkpoint_3000.pt', model, opt)
 
     print(generate_text(torch.from_numpy(np.array(tokenizer.encode('I will tell a story.'))).unsqueeze(0),model,10.,1.,0.1, 'basic' ,tokenizer))
+
+    print(generate_text(torch.from_numpy(np.array(tokenizer.encode('Camille is the most beautiful girl in the world. Camille is'))).unsqueeze(0),model,50.,0.5 ,0.1, 'basic' ,tokenizer))
+    print(generate_text(torch.from_numpy(np.array(tokenizer.encode('Camille and Finkiel'))).unsqueeze(0),model,50.,0.5 ,0.1, 'basic' ,tokenizer))
+    print(generate_text(torch.from_numpy(np.array(tokenizer.encode('Anna and the dog'))).unsqueeze(0),model,50.,0.5 ,0.1, 'basic' ,tokenizer))
+
+
+
+
     if torch.backends.mps.is_available():
         Device = torch.device("mps")
     else:
