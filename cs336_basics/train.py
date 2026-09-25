@@ -14,7 +14,7 @@ from cs336_basics.tokenizer import *
 from cs336_basics.model import *
 from cs336_basics.train import *
 from cs336_basics.data import *
-
+from cs336_basics.computations_flops import *
 def cross_entropy(logits,target):
     """ 
     inputs: logits : tensor _ vocab_size, target: int in [0,vocab_size-1]
@@ -157,9 +157,11 @@ class adamw(torch.optim.Optimizer):
                     break
 
                 state = self.state[p] # Get state associated with p. 
-                t = state.get("t", 1) # Get iteration number from the state, or 0.
-                m = state.get("m", torch.zeros_like(p)) # Get the tensor m from the state, or
-                v = state.get("v", torch.zeros_like(p)) # Get the tensor v from the state, or
+
+                if state == {}:
+                    t = state.get("t", 1) # Get iteration number from the state, or 0.
+                    m = state.get("m", torch.zeros_like(p)) # Get the tensor m from the state, or
+                    v = state.get("v", torch.zeros_like(p)) # Get the tensor v from the state, or
 
 
 
@@ -248,7 +250,7 @@ if __name__ == '__main__':
     parser.add_argument("--vocab_size", default=10000,type=int)
 
     parser.add_argument('--iterations', default=5000,type=int)
-    parser.add_argument('--batch_size', default=80, type=int)
+    parser.add_argument('--batch_size', default=40, type=int)
     parser.add_argument('--Device', default='mps')
     parser.add_argument("--Checkpoint_paths",default='checkpoints',type=str)
     
@@ -278,9 +280,14 @@ if __name__ == '__main__':
     Device=args.Device
 
     checkpoint_paths=args.Checkpoint_paths
+    nb_non_embedding_parameters= compute_non_embedding_parameters(num_layers,d_model,d_ff)
+
+    nb_parameters= compute_parameters(num_layers,d_model,d_ff,vocab_size)
+    print(f'Number of parameters in the model: {nb_parameters}')
+    print(f'Number of parameters in the model (in Gb): {4*nb_parameters*10**(-9)}')
+    print(f'Number of tokens suggested for training: {20*nb_parameters}')
 
     # Obtaining the device to use for training
-
     if torch.backends.mps.is_available():
         Device = torch.device("mps")
     else:
@@ -364,8 +371,8 @@ if __name__ == '__main__':
         opt.zero_grad() # Reset the gradients for all learnable parameters.
 
         loss=cross_entropy(model(inputs_train),labels_train) # Compute the cross entropy loss
-        acc =cross_entropy(model(inputs_test),labels_test) # Compute the cross entropy loss
         if steps % 50 == 0:
+            acc =cross_entropy(model(inputs_test),labels_test) # Compute the cross entropy loss
             print(f'Accuracy for lr={lr}: {acc.cpu().item()}')
             print(f'Loss for lr={lr}: {loss.cpu().item()}')
             run.log({"acc": acc, "loss": loss})
@@ -378,15 +385,13 @@ if __name__ == '__main__':
 
         run.log({"Gradient norm before clipping": torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=max_norm)})
 
-
-        gradient_clipping(model.parameters(), max_norm=max_norm) # gradient clipping
+        #gradient_clipping(model.parameters(), max_norm=max_norm) # gradient clipping
         
         opt.step() # Run optimizer step.
 
     print(generate_text(torch.from_numpy(np.array(tokenizer.encode('I want to complete this sentence, please can i do the following'))).unsqueeze(0),model,100,0.01,0.1, 'basic' ,tokenizer))
 
-        
-
+    
 
         
 

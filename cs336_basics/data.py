@@ -15,6 +15,32 @@ def data_loading(x, batch_size, context_length, device):
         raise ValueError('the size of the input entries is not large enough')
 
     bs=[np.random.randint(low=0,high=n-context_length) for i in range(batch_size)]
+    inputs = []
+    outputs = []
+    for j in bs:
+        u=x[j:j+context_length+1]
+        inputs.append(u[:-1])
+        outputs.append(u[1:])
+    inputs = np.array(inputs)
+    outputs = np.array(outputs)
+
+    inputs = torch.tensor(inputs, device=device)
+    outputs = torch.tensor(outputs,device=device)
+
+    return (inputs,outputs)
+
+def data_loading_old(x, batch_size, context_length, device):
+    """
+    inputs: x: numpy array, batch_size: int, context_length: int, device={cpu, cuda}
+    output: (x,y), x: tensor:  batch_size context_length, y: tensor batch_size context_length
+    """
+
+    n = x.size # obtain the number of tokens
+
+    if n-context_length < batch_size:
+        raise ValueError('the size of the input entries is not large enough')
+
+    bs=[np.random.randint(low=0,high=n-context_length) for i in range(batch_size)]
 
     inputs = np.array([ [x[i] for i in range(j,j+context_length)] for j in bs])
     outputs = np.array([ [x[i+1] for i in range(j,j+context_length)] for j in bs])
@@ -41,7 +67,7 @@ def load_checkpoint(src, model, optimizer):
     """
     load the model and the optimizer and returns iteration
     """
-    dict_out=torch.load(src)  # load the saved dictionnary previously defined
+    dict_out=torch.load(src, map_location=torch.device('cpu'))  # load the saved dictionnary previously defined
 
     model.load_state_dict(dict_out["model"]) # load the model dictionnary
     optimizer.load_state_dict(dict_out["optimizer"]) # load the optimizer dictionnary
