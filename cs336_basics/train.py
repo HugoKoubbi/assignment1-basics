@@ -163,8 +163,10 @@ class adamw(torch.optim.Optimizer):
                     m = state.get("m", torch.zeros_like(p)) # Get the tensor m from the state, or
                     v = state.get("v", torch.zeros_like(p)) # Get the tensor v from the state, or
 
-
-
+                else:
+                    t = state["t"] # Get iteration number from the state, or 0.
+                    m = state["m"] # Get the tensor m from the state, or
+                    v = state["v"] # Get the tensor v from the state, or
                 grad = p.grad.data # Get the gradient of loss with respect to p.
                 alpha = lr * ( 1-beta2**(t) )**(1/2) / ( 1-beta1**(t) ) # Compute the adjusted lr at iteration t
                 p.data = p.data -lr * wd * p.data # Apply weight decay
@@ -251,6 +253,8 @@ if __name__ == '__main__':
 
     parser.add_argument('--iterations', default=5000,type=int)
     parser.add_argument('--batch_size', default=40, type=int)
+    parser.add_argument('--number_tokens_test', default=50000, type=int)
+    parser.add_argument('--number_tokens', default=12000000, type=int)
     parser.add_argument('--Device', default='mps')
     parser.add_argument("--Checkpoint_paths",default='checkpoints',type=str)
     
@@ -277,6 +281,8 @@ if __name__ == '__main__':
 
     iterations=args.iterations
     batch_size=args.batch_size
+    number_tokens=args.number_tokens
+    number_tokens_test=args.number_tokens_test
     Device=args.Device
 
     checkpoint_paths=args.Checkpoint_paths
@@ -286,7 +292,7 @@ if __name__ == '__main__':
     print(f'Number of parameters in the model: {nb_parameters}')
     print(f'Number of parameters in the model (in Gb): {4*nb_parameters*10**(-9)}')
     print(f'Number of tokens suggested for training: {20*nb_parameters}')
-
+    print(f'Number of tokens for training: {number_tokens}')
     # Obtaining the device to use for training
     if torch.backends.mps.is_available():
         Device = torch.device("mps")
@@ -307,8 +313,8 @@ if __name__ == '__main__':
             print(f'Merges size: {len(merges)}')
             print(f'Tokenizer initialized.')
             # Tokenize the data
-            training_data = training_data.read(500000)
-            test_data = test_data.read(5000)
+            training_data = training_data.read(number_tokens)
+            test_data = test_data.read(number_tokens_test)
             np.save('data/training_tokenized' ,tokenizer.encode(training_data))
             np.save('data/test_tokenized',tokenizer.encode(test_data))
 
