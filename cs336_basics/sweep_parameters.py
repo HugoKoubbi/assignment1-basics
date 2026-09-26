@@ -9,6 +9,7 @@ import math
 import argparse
 import wandb
 import tqdm
+import itertools as iterpols
 
 from cs336_basics.tokenizer import *
 from cs336_basics.model import *
@@ -18,22 +19,21 @@ from cs336_basics.computations_flops import *
 
 
 def sweep_parameters():
-
-    x_beta_1=np.linspace(0.9,0.999,10)
-    x_beta_2=np.linspace(0.9,0.999,10)
-    x_lr=np.linspace(1e-5,1e-3,10)
-    x_wd=np.linspace(1e-5,1e-2,10)
-    x_alpha_max=np.linspace(1e-5,1e-3,10)
+    x_beta_1=np.linspace(0.9,0.999,5)
+    x_beta_2=np.linspace(0.9,0.999,5)
+    x_lr=np.linspace(1e-5,1e-3,5)
+    x_wd=np.linspace(1e-5,1e-2,5)
+    x_alpha_max=np.linspace(1e-3,1e-3,1)
     x_alpha_min=np.linspace(1e-5,1e-3,10)
-    x_max_norm=np.linspace(0.1,1.0,10)
-    x_tw=np.linspace(10,100,10)
-    x_tc=np.linspace(100,1000,10)
-    iterations=100
-
+    x_max_norm=np.linspace(0.1,1.0,1)
+    x_tw=np.linspace(10,100,1)
+    x_tc=np.linspace(100,1000,1)
+    iterations=10
+    
     dict_sweep={"beta_1":x_beta_1,"beta_2":x_beta_2,"lr":x_lr,"wd":x_wd,"alpha_max":x_alpha_max,"alpha_min":x_alpha_min,"max_norm":x_max_norm,"tw":x_tw,"tc":x_tc}
 
     loss_training=np.zeros([len(x_beta_1),len(x_beta_2),len(x_lr),len(x_wd),len(x_alpha_max),len(x_alpha_min),len(x_max_norm),len(x_tw),len(x_tc)])
-    for (i_beta1,i_beta2,i_lr,i_wd,i_alpha_max,i_alpha_min,i_max_norm,i_tw,i_tc) in zip(range(len(x_beta_1)),range(len(x_beta_2)),range(len(x_lr)),range(len(x_wd)),range(len(x_alpha_max)),range(len(x_alpha_min)),range(len(x_max_norm)),range(len(x_tw)),range(len(x_tc))):
+    for (i_beta1,i_beta2,i_lr,i_wd,i_alpha_max,i_alpha_min,i_max_norm,i_tw,i_tc) in iterpols.product(range(len(x_beta_1)),range(len(x_beta_2)),range(len(x_lr)),range(len(x_wd)),range(len(x_alpha_max)),range(len(x_alpha_min)),range(len(x_max_norm)),range(len(x_tw)),range(len(x_tc))):
         beta1=x_beta_1[i_beta1]
         beta2=x_beta_2[i_beta2]
         lr=x_lr[i_lr]
@@ -52,18 +52,16 @@ def finding_optimal_parameters(loss_training,dict_sweep):
     optimal_parameters={key: dict_sweep[key][min_index[i]] for i,key in enumerate(dict_sweep.keys())}
     return optimal_parameters
 
-
-print(64*3)
-def train_model(beta1,beta2,lr,wd,alpha_max,alpha_min,max_norm,t_w,t_c,iterations=100):
+def train_model(beta1,beta2,lr,wd,alpha_max,alpha_min,max_norm,t_w,t_c,iterations=50):
     # Define the hyperparameters for training
     context_length=128
-    num_layers=12
+    num_layers=8
     num_heads=4
     d_model=128
     d_ff= 192
     theta=10000
     vocab_size=10000
-    batch_size=40
+    batch_size=1
     Device='mps'
     Checkpoint_paths='checkpoints'
     number_tokens=30000
@@ -117,4 +115,4 @@ def train_model(beta1,beta2,lr,wd,alpha_max,alpha_min,max_norm,t_w,t_c,iteration
     return loss.item()
 
 loss_training,dict_sweep=sweep_parameters()
-finding_optimal_parameters(loss_training,dict_sweep)
+print(f"Optimal parameters: {finding_optimal_parameters(loss_training,dict_sweep)}")

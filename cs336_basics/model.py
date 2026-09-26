@@ -77,7 +77,7 @@ class rmsnorm(nn.Module):
 
         return res.to(in_dtype)
 
-
+#### MLP implementation
 class positionwise_feedforward(nn.Module):
     """
     Apply the MLP part
@@ -113,7 +113,29 @@ class positionwise_feedforward(nn.Module):
         #x=einsum(z,self.w2.T,'... d_ff, d_ff d_model->... d_model')
         return x
 
+class MoeLayer(nn.Module):
+    """
+    Mistral implementation of MoEs
+    """
+    def __init__(self, experts: List[nn.Module], gate: nn.Module):
+        super().__init__()
+        assert len(experts) > 0
+        self.experts = nn.ModuleList(experts)
+        self.gate = gate
 
+    def forward(self, inputs: torch.Tensor) -> torch.Tensor:
+        gate_logits = self.gate(inputs)
+        weights, selected_experts = torch.topk(gate_logits, self.args.num_experts_per_tok)
+        weights = F.softmax(weights, dim=1, dtype=torch.float).to(inputs.dtype)
+        results = torch.zeros_like(inputs)
+        for i, expert in enumerate(self.experts):
+            batch_idx, nth_expert = torch.where(selected_experts == i)
+            results[batch_idx] += weights[batch_idx, nth_expert, None] * expert(inputs[batch_idx])
+        return results
+
+
+
+### ROPE implementation
 class RotaryPositionalEmbedding(nn.Module):
     """
     Apply RoPE 
@@ -271,6 +293,8 @@ def scaled_dot_product_attention(key,query,values,mask):
     return output
 
 
+
+### implementation of the different multihead self attention modules
 class multihead_self_attention_dumb(nn.Module):
 
     """ 
@@ -437,6 +461,96 @@ class multihead_self_attention(nn.Module):
 
         return attn
 
+class sliding_window_multihead_self_attention(nn.Module):
+    """
+    Sliding window attention mechanism
+    """
+    def __init__(self, d_model, num_heads, window_size, context_length, rope_theta=10000):
+        super().__init__()
+        self.d_model = d_model
+        self.num_heads = num_heads
+        self.window_size = window_size
+        self.context_length = context_length
+        self.rope_theta = rope_theta
+
+    def forward(self, x):
+        seq_len = x.shape[-2]
+        query = self.q_proj(x)
+        key = self.k_proj(x)
+        values = self.v_proj(x)
+
+        query = rearrange(query, '... seq_len (h d_h)  -> ... h seq_len d_h ' , h=self.num_heads)
+        key = rearrange(key,'... seq_len (h d_h)  -> ...  h seq_len d_h' , h=self.num_heads)
+        values=rearrange(values,'... seq_len (h d_h)  -> ...  h seq_len d_h' , h=self.num_heads)
+
+        # Apply RoPE 
+        token_positions = torch.arange(
+                seq_len,
+                device=x.device,
+        )
+            
+        query=self.rope(query,token_positions)
+        key=self.rope(key,token_positions)
+
+        # Create sliding window mask
+        mask = torch.zeros(seq_len, seq_len, device=x.device).bool()
+        for i in range(seq_len):
+            start = max(0, i - self.window_size + 1)
+            mask[i, start:i+1] = True
+
+        attn=scaled_dot_product_attention(key,query,values,mask) 
+        attn=rearrange(attn,'...  h seq_len d_h ->... seq_len (h d_h)' , h=self.num_heads)
+        attn=self.output_proj(attn)
+
+        return attn
+
+class sliding_window_multihead_self_attention_sink(nn.Module):
+    """
+    Sliding window attention mechanism with sink 
+    """
+    
+    def __init__(self, d_model, num_heads, window_size, context_length, sink, rope_theta=10000):
+        super().__init__()
+        self.d_model = d_model
+        self.num_heads = num_heads
+        self.window_size = window_size
+        self.context_length = context_length
+        self.rope_theta = rope_theta
+        self.sink = sink
+    def forward(self, x):
+        seq_len = x.shape[-2]
+        query = self.q_proj(x)
+        key = self.k_proj(x)
+        values = self.v_proj(x)
+
+        query = rearrange(query, '... seq_len (h d_h)  -> ... h seq_len d_h ' , h=self.num_heads)
+        key = rearrange(key,'... seq_len (h d_h)  -> ...  h seq_len d_h' , h=self.num_heads)
+        values=rearrange(values,'... seq_len (h d_h)  -> ...  h seq_len d_h' , h=self.num_heads)
+
+        # Apply RoPE 
+        token_positions = torch.arange(
+                seq_len,
+                device=x.device,
+        )
+            
+        query=self.rope(query,token_positions)
+        key=self.rope(key,token_positions)
+
+        # Create sliding window mask
+        mask = torch.zeros(seq_len, seq_len, device=x.device).bool()
+        for i in range(seq_len):
+            start = max(0, i - self.window_size + 1)
+            mask[i, start:i+1] = True
+            mask[i, self.sink: ] = True  # Allow attention to sink token
+
+        attn=scaled_dot_product_attention(key,query,values,mask) 
+        attn=rearrange(attn,'...  h seq_len d_h ->... seq_len (h d_h)' , h=self.num_heads)
+        attn=self.output_proj(attn)
+
+        return attn    
+
+
+### implementation of the transformer blocks 
 class Transformer_block_standard(nn.Module):
     def __init__(self,d_model,num_heads,d_ff,max_seq_len=1024,rope_theta=100):
 
@@ -475,6 +589,43 @@ class Transformer_block_residual(nn.Module):
             h4=h2+self.ffn(h3)*self.depth **(self.alpha)
             return h4
 
+class Transformer_block_sldwd(nn.Module):
+    def __init__(self,d_model,num_heads,d_ff,max_seq_len=1024,rope_theta=100,window_size=128):
+
+        super().__init__()
+
+        self.attn=sliding_window_multihead_self_attention(d_model,num_heads,window_size,max_seq_len,rope_theta=rope_theta)
+        self.ffn=positionwise_feedforward(d_model,d_ff)
+        self.ln1=rmsnorm(d_model)
+        self.ln2=rmsnorm(d_model)
+
+    def forward(self,x):
+            h1=self.attn(self.ln1(x))
+            h2=x+h1
+            h3=self.ln2(h2)
+            h4=h2+self.ffn(h3)
+            return h4
+
+class Transformer_block_sldwd_sink(nn.Module):
+    def __init__(self,d_model,num_heads,d_ff,max_seq_len=1024,rope_theta=100,window_size=128,sink=0):
+
+        super().__init__()
+
+        self.attn=sliding_window_multihead_self_attention_sink(d_model,num_heads,window_size,max_seq_len,sink,rope_theta=rope_theta)
+        self.ffn=positionwise_feedforward(d_model,d_ff)
+        self.ln1=rmsnorm(d_model)
+        self.ln2=rmsnorm(d_model)
+
+    def forward(self,x):
+            h1=self.attn(self.ln1(x))
+            h2=x+h1
+            h3=self.ln2(h2)
+            h4=h2+self.ffn(h3)
+            return h4
+
+
+### implementation of the transformer language model
+    
 class transformers_lm(nn.Module):
     def __init__(self,vocab_size,context_length, num_layers,d_model,num_heads,d_ff,rope_theta):
 
@@ -611,30 +762,86 @@ class transformers_lm_Moe(nn.Module):
  
         return probes   
 
-class MoeLayer(nn.Module):
-    """
-    Mistral implementation of MoEs
-    """
-    def __init__(self, experts: List[nn.Module], gate: nn.Module):
+class transformers_lm_sdw(nn.Module):
+    def __init__(self,vocab_size,context_length, num_layers,d_model,num_heads,d_ff,alpha,window_size):
+
         super().__init__()
-        assert len(experts) > 0
-        self.experts = nn.ModuleList(experts)
-        self.gate = gate
+ 
+        self.d_model = d_model
+        self.num_heads = num_heads
+        self.d_ff = d_ff
+        self.vocab_size = vocab_size
+        self.context_length = context_length
+        self.num_layers = num_layers
+ 
+ 
+        self.token_embeddings=embedding(vocab_size,d_model)
+        self.lm_head=linear(d_model,vocab_size)
+ 
+        self.rmsnorm=rmsnorm(d_model)
+        self.ln_final=rmsnorm(d_model)
+ 
+     # Here we used Module List to have a nn.parameter that can contains a list, and then each of the layer is considered as an element of the list.
+        self.layers=nn.ModuleList([ 
+        Transformer_block_sldwd(d_model,num_heads,d_ff,max_seq_len=context_length,depth=num_layers,alpha=alpha,window_size=window_size)
+         for l in range(num_layers)])
+ 
+    def forward(self,x):
+ 
+        x=self.token_embeddings(x)
+ 
+        for layer in self.layers:
+            x=layer(x)
+             
+        x=self.ln_final(x)        
+        x=self.lm_head(x)
+ 
+        probes=x
+             #probes=softmax(x,dim=-1)
+ 
+        return probes
 
-    def forward(self, inputs: torch.Tensor) -> torch.Tensor:
-        gate_logits = self.gate(inputs)
-        weights, selected_experts = torch.topk(gate_logits, self.args.num_experts_per_tok)
-        weights = F.softmax(weights, dim=1, dtype=torch.float).to(inputs.dtype)
-        results = torch.zeros_like(inputs)
-        for i, expert in enumerate(self.experts):
-            batch_idx, nth_expert = torch.where(selected_experts == i)
-            results[batch_idx] += weights[batch_idx, nth_expert, None] * expert(inputs[batch_idx])
-        return results
+class transformers_lm_sdw_sink(nn.Module):
+    def __init__(self,vocab_size,context_length, num_layers,d_model,num_heads,d_ff,alpha,window_size,sink):
+
+        super().__init__()
+ 
+        self.d_model = d_model
+        self.num_heads = num_heads
+        self.d_ff = d_ff
+        self.vocab_size = vocab_size
+        self.context_length = context_length
+        self.num_layers = num_layers
+ 
+ 
+        self.token_embeddings=embedding(vocab_size,d_model)
+        self.lm_head=linear(d_model,vocab_size)
+ 
+        self.rmsnorm=rmsnorm(d_model)
+        self.ln_final=rmsnorm(d_model)
+ 
+     # Here we used Module List to have a nn.parameter that can contains a list, and then each of the layer is considered as an element of the list.
+        self.layers=nn.ModuleList([ 
+        Transformer_block_sldwd_sink(d_model,num_heads,d_ff,max_seq_len=context_length,depth=num_layers,alpha=alpha,window_size=window_size,sink=sink)
+         for l in range(num_layers)])
+ 
+    def forward(self,x):
+ 
+        x=self.token_embeddings(x)
+ 
+        for layer in self.layers:
+            x=layer(x)
+             
+        x=self.ln_final(x)        
+        x=self.lm_head(x)
+ 
+        probes=x
+             #probes=softmax(x,dim=-1)
+ 
+        return probes
 
 
-
-
-
+### Decoding function, given a model and an input, generate a sequence of tokens
 def decoding(x, model, max_tokens, tau, threshold,type):
     """ 
     inputs: x batch_size seq_len 
