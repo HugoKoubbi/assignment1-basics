@@ -78,7 +78,7 @@ class rmsnorm(nn.Module):
         return res.to(in_dtype)
 
 #### MLP implementation
-class positionwise_feedforward(nn.Module):
+class SwiGLU(nn.Module):
     """
     Apply the MLP part
     params: d_ff: int, d_model: int, 
@@ -112,6 +112,21 @@ class positionwise_feedforward(nn.Module):
         x=self.w2(z)
         #x=einsum(z,self.w2.T,'... d_ff, d_ff d_model->... d_model')
         return x
+
+class positionwise_feedforward(nn.Module):
+    def __init__(self, d_model, d_ff):
+        super().__init__()
+
+        # Calcule simultanément les projections gate et up.
+        self.gate_up = nn.Linear(d_model, 2 * d_ff, bias=False)
+        self.down = nn.Linear(d_ff, d_model, bias=False)
+
+    def forward(self, x):
+        # x : [batch_size, context_length, d_model]
+        gate, up = self.gate_up(x).chunk(2, dim=-1)
+
+        return self.down(F.silu(gate) * up)
+
 
 class MoeLayer(nn.Module):
     """

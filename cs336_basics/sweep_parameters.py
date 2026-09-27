@@ -19,12 +19,12 @@ from cs336_basics.computations_flops import *
 
 
 def sweep_parameters():
-    x_beta_1=np.linspace(0.9,0.999,5)
-    x_beta_2=np.linspace(0.9,0.999,5)
+    x_beta_1=np.linspace(0.95,0.999,5)
+    x_beta_2=np.linspace(0.9,0.95,5)
     x_lr=np.linspace(1e-5,1e-3,5)
-    x_wd=np.linspace(1e-5,1e-2,5)
+    x_wd=np.linspace(1e-3,1e-2,5)
     x_alpha_max=np.linspace(1e-3,1e-3,1)
-    x_alpha_min=np.linspace(1e-5,1e-3,10)
+    x_alpha_min=np.linspace(1e-5,1e-3,1)
     x_max_norm=np.linspace(0.1,1.0,1)
     x_tw=np.linspace(10,100,1)
     x_tc=np.linspace(100,1000,1)

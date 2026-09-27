@@ -2,8 +2,42 @@ import torch
 from einops import rearrange,einsum
 import torch.nn as nn
 import numpy as np
+import numpy as np
+import torch
+
 
 def data_loading(x, batch_size, context_length, device):
+    """x : tableau NumPy 1D contenant des identifiants de tokens."""
+    if x.ndim != 1:
+        raise ValueError("x doit être un tableau 1D")
+
+    if batch_size <= 0 or context_length <= 0:
+        raise ValueError("batch_size et context_length doivent être positifs")
+
+    n = x.size
+    if n <= context_length:
+        raise ValueError("Il faut au moins context_length + 1 tokens")
+
+    # Une position de départ par séquence, tirée avec remise.
+    starts = np.random.randint(
+        low=0,
+        high=n - context_length,
+        size=batch_size,
+    )
+
+    # [B, 1] + [1, S] donne un tableau d'indices [B, S].
+    indices = starts[:, None] + np.arange(context_length)[None, :]
+
+    # On convertit uniquement les batches, pas le corpus entier.
+    inputs = np.ascontiguousarray(x[indices], dtype=np.int64)
+    outputs = np.ascontiguousarray(x[indices + 1], dtype=np.int64)
+
+    return (
+        torch.from_numpy(inputs).to(device),
+        torch.from_numpy(outputs).to(device),
+    )
+
+def data_loadin_old2(x, batch_size, context_length, device):
     """
     inputs: x: numpy array, batch_size: int, context_length: int, device={cpu, cuda}
     output: (x,y), x: tensor:  batch_size context_length, y: tensor batch_size context_length
