@@ -381,6 +381,14 @@ class multihead_self_attention_wo_rope(nn.Module):
         self.max_seq_len=max_seq_len
         #### Here the smart idea is to biggest matrix and then slice it using einsum operations
     
+    #### use a buffer to not instantiate the matrix each time.
+        
+        mask= torch.tril(
+            torch.ones(max_seq_len, max_seq_len),
+            diagonal=0
+        ).bool()
+        self.register_buffer("mask", mask, persistent=False)
+
     def forward(self, x):
 
         seq_len = x.shape[-2]
@@ -393,10 +401,12 @@ class multihead_self_attention_wo_rope(nn.Module):
         key = rearrange(key,'... seq_len (h d_h)  -> ...  h seq_len d_h' , h=self.num_heads)
         values=rearrange(values,'... seq_len (h d_h)  -> ...  h seq_len d_h' , h=self.num_heads)
 
-        mask=torch.tril(
-            torch.ones(seq_len, seq_len),
-            diagonal=0
-        ).bool()
+        #mask=torch.tril(
+        #    torch.ones(seq_len, seq_len),
+        #    diagonal=0
+        #).bool()
+
+        mask=self.mask[:seq_len,:seq_len]
 
         attn=scaled_dot_product_attention(key,query,values,mask)
         attn=rearrange(attn,'...  h seq_len d_h ->... seq_len (h d_h)' , h=self.num_heads)
@@ -438,7 +448,20 @@ class multihead_self_attention(nn.Module):
         self.rope=RotaryPositionalEmbedding_gpt(rope_theta,self.d_k,max_seq_len)
 
         #### Here the smart idea is to biggest matrix and then slice it using einsum operations
-    
+        mask= torch.tril(
+            torch.ones(max_seq_len, max_seq_len),
+            diagonal=0
+        ).bool()
+
+        self.register_buffer("mask", mask, persistent=False)
+
+        token_positions = torch.arange(
+                max_seq_len,
+                device=device,
+        )
+
+        self.register_buffer("token_positions", token_positions, persistent=False)
+
     def forward(self, x):
 
         seq_len = x.shape[-2]
@@ -452,20 +475,24 @@ class multihead_self_attention(nn.Module):
         values=rearrange(values,'... seq_len (h d_h)  -> ...  h seq_len d_h' , h=self.num_heads)
 
         #Apply RoPE 
-        token_positions = torch.arange(
-                seq_len,
-                device=x.device,
-        )
+        #token_positions = torch.arange(
+        #        self.max_seq_len,
+        #        device=x.device,
+        #)
+
+        tokens_positions = self.token_positions
+        tokens_positions = tokens_positions[:seq_len]
             
-        query=self.rope(query,token_positions)
-        key=self.rope(key,token_positions)
+        query=self.rope(query,tokens_positions)
+        key=self.rope(key,tokens_positions)
 
 
-        mask=torch.tril(
-            torch.ones(seq_len, seq_len,device=x.device),
-            diagonal=0
-        ).bool()
+        #mask=torch.tril(
+        #    torch.ones(seq_len, seq_len,device=x.device),
+        #    diagonal=0
+        #).bool()
 
+        mask=self.mask[:seq_len,:seq_len]
         #print(mask)
 
         ### pour le softmax, il faut des queries et keys de la forme b ... n d_v, on considere les tetes comme dans le batch
@@ -480,13 +507,28 @@ class sliding_window_multihead_self_attention(nn.Module):
     """
     Sliding window attention mechanism
     """
-    def __init__(self, d_model, num_heads, window_size, context_length, rope_theta=10000):
+    def __init__(self, d_model, num_heads, window_size, context_length, rope_theta=10000,device=None, dtype=None):
         super().__init__()
         self.d_model = d_model
         self.num_heads = num_heads
         self.window_size = window_size
         self.context_length = context_length
         self.rope_theta = rope_theta
+        self.max_seq_len = context_length
+
+        mask = torch.zeros(context_length,context_length, device=x.device).bool()
+        for i in range(context_length):
+            start = max(0, i - self.window_size + 1)
+            mask[i, start:i+1] = True
+
+        self.register_buffer("mask", mask, persistent=False)
+        
+        token_positions = torch.arange(
+                        self.max_seq_len,
+                        device=device,
+                )
+        
+        self.register_buffer("token_positions", token_positions, persistent=False)
 
     def forward(self, x):
         seq_len = x.shape[-2]
@@ -499,19 +541,15 @@ class sliding_window_multihead_self_attention(nn.Module):
         values=rearrange(values,'... seq_len (h d_h)  -> ...  h seq_len d_h' , h=self.num_heads)
 
         # Apply RoPE 
-        token_positions = torch.arange(
-                seq_len,
-                device=x.device,
-        )
-            
+        token_positions = self.token_positions[:seq_len]
+
         query=self.rope(query,token_positions)
         key=self.rope(key,token_positions)
 
+
         # Create sliding window mask
-        mask = torch.zeros(seq_len, seq_len, device=x.device).bool()
-        for i in range(seq_len):
-            start = max(0, i - self.window_size + 1)
-            mask[i, start:i+1] = True
+
+        mask = self.mask[:seq_len,:seq_len]
 
         attn=scaled_dot_product_attention(key,query,values,mask) 
         attn=rearrange(attn,'...  h seq_len d_h ->... seq_len (h d_h)' , h=self.num_heads)
@@ -676,8 +714,9 @@ class transformers_lm(nn.Module):
         x=self.lm_head(x)
 
         probes=x
+            
             #probes=softmax(x,dim=-1)
-
+            
         return probes
 
 class transformers_lm_muP(nn.Module):

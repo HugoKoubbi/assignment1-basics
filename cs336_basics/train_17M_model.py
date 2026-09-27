@@ -15,6 +15,7 @@ from cs336_basics.model import *
 from cs336_basics.train import *
 from cs336_basics.data import *
 from cs336_basics.computations_flops import *
+import torch.nn.functional as F
 
 if __name__ == '__main__':
     parser=argparse.ArgumentParser()
@@ -42,6 +43,9 @@ if __name__ == '__main__':
     parser.add_argument('--number_tokens', default=40000000, type=int)
     parser.add_argument('--Device', default='mps')
     parser.add_argument("--Checkpoint_paths",default='checkpoints',type=str)
+    parser.add_argument("--Reused_training", default=True, type=bool )
+    parser.add_argument("--checkpoint_load", default="checkpoints", type=str)
+    parser.add_argument("--training_time_loading", default=0, type=int)
     
     args = parser.parse_args()
 
@@ -71,6 +75,10 @@ if __name__ == '__main__':
     Device=args.Device
 
     checkpoint_paths=args.Checkpoint_paths
+    checkpoint_load="checkpoints/checkpoint_run17M_4000.pt"
+    training_time_loading=4000
+
+
     nb_non_embedding_parameters= compute_non_embedding_parameters(num_layers,d_model,d_ff)
 
     nb_parameters= compute_parameters(num_layers,d_model,d_ff,vocab_size)
@@ -133,15 +141,30 @@ if __name__ == '__main__':
     )
 
     # Initialize the transformers
-    model = transformers_lm(vocab_size,context_length,num_layers,d_model,num_heads,d_ff,rope_theta=theta)
-    model.to(Device)
-    model=torch.compile(model, backend="aot_eager")
-    model_dict=model.parameters()
+    if args.Reused_training:
+        checkpoint = torch.load(checkpoint_load, map_location=Device)
+        model = transformers_lm(vocab_size,context_length,num_layers,d_model,num_heads,d_ff,rope_theta=theta)
+        model=torch.compile(
+        model,
+        backend="inductor",
+        mode="default",
+        dynamic=False,)
 
-    opt = adamw(model_dict, lr=lr,betas=betas,eps=1e-5,weight_decay=wd)
+        model.load_state_dict(checkpoint['model'])
+        model.to(Device)
+        model_dict=model.parameters()
+        opt = adamw(model_dict, lr=lr,betas=betas,eps=1e-5,weight_decay=wd)
+        opt.load_state_dict(checkpoint['optimizer'])
+    else:    
+        model = transformers_lm(vocab_size,context_length,num_layers,d_model,num_heads,d_ff,rope_theta=theta)
+        model.to(Device)
+        model=torch.compile(model, backend="inductor", mode="default", dynamic=False)
+        model_dict=model.parameters()
+        opt = adamw(model_dict, lr=lr,betas=betas,eps=1e-5,weight_decay=wd)
 
     for steps in tqdm(range(iterations)):
-
+        if steps<= training_time_loading:
+            continue
     #creating batch_size, inputs,outputs
         inputs_train , labels_train = data_loading(training_tokenized_mm,batch_size,context_length,Device)
         inputs_test , labels_test = data_loading(test_tokenized_mm,batch_size,context_length,Device)
@@ -163,20 +186,23 @@ if __name__ == '__main__':
         opt.zero_grad() # Reset the gradients for all learnable parameters.
 
         loss=cross_entropy(model(inputs_train),labels_train) # Compute the cross entropy loss
+        #loss=F.cross_entropy(input=model(inputs_train),target=labels_train) # Compute the cross entropy loss
         if steps % 50 == 0:
-            acc =cross_entropy(model(inputs_test),labels_test) # Compute the cross entropy loss
-            print(f'Accuracy for lr={lr}: {acc.cpu().item()}')
-            print(f'Loss for lr={lr}: {loss.cpu().item()}')
-            run.log({"acc": acc, "loss": loss})
-            print(f'torch.mps.current.allocated_memory: {torch.mps.current_allocated_memory()}')
-            current_allocated_memory = torch.mps.current_allocated_memory() / (1024**3)
-            print(f"torch_current_memory: {current_allocated_memory:.2f} GiB")
-            recommended_gib = torch.mps.recommended_max_memory() / (1024**3)
-            print(f"Recommended MPS working set: {recommended_gib:.2f} GiB")
+            with torch.no_grad():
+                model.eval()
+                acc =cross_entropy(model(inputs_test),labels_test) # Compute the cross entropy loss
+                print(f'Accuracy for lr={lr}: {acc.cpu().item()}')
+                print(f'Loss for lr={lr}: {loss.cpu().item()}')
+                run.log({"acc": acc, "loss": loss})
+                print(f'torch.mps.current.allocated_memory: {torch.mps.current_allocated_memory()}')
+                #current_allocated_memory = torch.mps.current_allocated_memory() / (1024**3)
+                #print(f"torch_current_memory: {current_allocated_memory:.2f} GiB")
+                #recommended_gib = torch.mps.recommended_max_memory() / (1024**3)
+                #print(f"Recommended MPS working set: {recommended_gib:.2f} GiB")
         loss.backward() # compute the gradient
 
-        run.log({"Gradient norm before clipping": torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=max_norm)})
-
+        #run.log({"Gradient norm before clipping": torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=max_norm)})
+        torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=max_norm)
         #gradient_clipping(model.parameters(), max_norm=max_norm) # gradient clipping
         
         opt.step() # Run optimizer step.
