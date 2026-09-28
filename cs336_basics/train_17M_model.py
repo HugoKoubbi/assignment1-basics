@@ -27,8 +27,8 @@ if __name__ == '__main__':
     parser.add_argument("--betas", default=(0.9, 0.999),type=tuple)
     parser.add_argument("--alpha_max", default=1e-3,type=float)
     parser.add_argument("--alpha_min", default=1e-4,type=float)
-    parser.add_argument("--t_w",default=500,type=int) # choose 1-10% of the run that is in the warmup phase
-    parser.add_argument("--t_c",default=5000,type=int) # choose such that the end of training coincides with the end of decay phases
+    parser.add_argument("--t_w",default=4000,type=int) # choose 1-10% of the run that is in the warmup phase
+    parser.add_argument("--t_c",default=40000,type=int) # choose such that the end of training coincides with the end of decay phases
     parser.add_argument("--max_norm",default=10.0,type=float)
     parser.add_argument("--context_length", default=256,type=int)
     parser.add_argument("--num_layers", default=4,type=int)
@@ -37,10 +37,10 @@ if __name__ == '__main__':
     parser.add_argument("--d_ff", default=1344,type=int)
     parser.add_argument("--theta", default=10000,type=int)
     parser.add_argument("--vocab_size", default=10000,type=int)
-    parser.add_argument('--iterations', default=5000,type=int)
+    parser.add_argument('--iterations', default=40005,type=int)
     parser.add_argument('--batch_size', default=32, type=int)
     parser.add_argument('--number_tokens_test', default=100000, type=int)
-    parser.add_argument('--number_tokens', default=40000000, type=int)
+    parser.add_argument('--number_tokens', default=400000000, type=int)
     parser.add_argument('--Device', default='mps')
     parser.add_argument("--Checkpoint_paths",default='checkpoints',type=str)
     parser.add_argument("--Reused_training", default=True, type=bool )
@@ -75,8 +75,8 @@ if __name__ == '__main__':
     Device=args.Device
 
     checkpoint_paths=args.Checkpoint_paths
-    checkpoint_load="checkpoints/checkpoint_run17M_4000.pt"
-    training_time_loading=4000
+    checkpoint_load="checkpoints/checkpoint_run17M_19000.pt"
+    training_time_loading=24000
 
 
     nb_non_embedding_parameters= compute_non_embedding_parameters(num_layers,d_model,d_ff)
@@ -184,6 +184,11 @@ if __name__ == '__main__':
 
 
         opt.zero_grad() # Reset the gradients for all learnable parameters.
+        #batch_size,seq_len,d_vocab_size=inputs_train.shape
+        # inputs_train=model(inputs_train).reshape(batch_size*seq_len,d_vocab_size)
+        # labels_train=labels_train.reshape(batch_size*seq_len)
+        # loss=F.cross_entropy(input=inputs_train,target=labels_train) # Compute the cross entropy loss
+
 
         loss=cross_entropy(model(inputs_train),labels_train) # Compute the cross entropy loss
         #loss=F.cross_entropy(input=model(inputs_train),target=labels_train) # Compute the cross entropy loss
