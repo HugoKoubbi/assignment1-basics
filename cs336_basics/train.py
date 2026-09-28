@@ -9,6 +9,7 @@ import math
 import argparse
 import wandb
 import tqdm
+import torch.nn.functional as F
 
 from cs336_basics.tokenizer import *
 from cs336_basics.model import *
@@ -71,8 +72,8 @@ class SGD(torch.optim.Optimizer):
 
         return loss
 
-weights = torch.nn.Parameter(5 * torch.randn((10, 10)))
-opt = SGD([weights], lr=1)
+#weights = torch.nn.Parameter(5 * torch.randn((10, 10)))
+#opt = SGD([weights], lr=1)
 
 #for t in range(100):
 ##    opt.zero_grad() # Reset the gradients for all learnable parameters.
@@ -140,43 +141,50 @@ class adamw(torch.optim.Optimizer):
 
         loss = None if closure is None else closure()
 
-
+        with torch.no_grad():
         # each parameters get its own lr, beta1, beta 2, epsilon, wd
+            for group in self.param_groups:
+                lr = group["lr"]     # Get the learning rate.
+                beta1 = group["beta1"] # get the beta 1 variable
+                beta2 = group["beta2"] # get the beta 2 variable
+                eps = group["eps"]     # Get the epsilon variable 
+                wd = group["weight_decay"]    # get the weight decay variable
+                for p in group["params"]:
+                    if p.grad is None:
+                        break
 
-        for group in self.param_groups:
-            lr = group["lr"]     # Get the learning rate.
-            beta1 = group["beta1"] # get the beta 1 variable
-            beta2 = group["beta2"] # get the beta 2 variable
-            eps = group["eps"]     # Get the epsilon variable 
-            wd = group["weight_decay"]    # get the weight decay variable
+                    state = self.state[p] # Get state associated with p. 
 
+                    if state == {}:
+                        t = state.get("t", 1) # Get iteration number from the state, or 0.
+                        m = state.get("m", torch.zeros_like(p)) # Get the tensor m from the state, or
+                        v = state.get("v", torch.zeros_like(p)) # Get the tensor v from the state, or
+                    else:
+                        t = state["t"] # Get iteration number from the state, or 0.
+                        m = state["m"] # Get the tensor m from the state, or
+                        v = state["v"] # Get the tensor v from the state, or
+                    grad = p.grad.data # Get the gradient of loss with respect to p.
+                    alpha = lr * ( 1-beta2**(t) )**(1/2) / ( 1-beta1**(t) ) # Compute the adjusted lr at iteration t
+                
+                # Implementation of the AdamW update rule
+                    #p.data = p.data -lr * wd * p.data # Apply weight decay
+                    #m = beta1 * m +(1-beta1) * grad # Update the first moment estimate
+                    #v = beta2 * v + (1-beta2) *grad**2 # Update the second moment estimate
+                    #p.data -= alpha *m /( torch.sqrt(v)+ eps) # Update weight tensor in-place.
+                   
+                    #state["t"] = t + 1 # Increment iteration number.
+                    #state["m"] = m # Increment the tensor m
+                    #state["v"] = v # increment the tensor v
+                # Optimized version in terms of memory and instanciation of the tensors
+                
+                    p.data.mul_(1- lr * wd) # Apply weight decay
+                    m.mul_(beta1).add_(grad, alpha=1-beta1)
+                    v.mul_(beta2).addcmul_(grad,grad,value=1-beta2)
+                    p.data.addcdiv_(m, torch.sqrt(v)+eps, value=-alpha)
 
-            for p in group["params"]:
-
-                if p.grad is None:
-                    break
-
-                state = self.state[p] # Get state associated with p. 
-
-                if state == {}:
-                    t = state.get("t", 1) # Get iteration number from the state, or 0.
-                    m = state.get("m", torch.zeros_like(p)) # Get the tensor m from the state, or
-                    v = state.get("v", torch.zeros_like(p)) # Get the tensor v from the state, or
-
-                else:
-                    t = state["t"] # Get iteration number from the state, or 0.
-                    m = state["m"] # Get the tensor m from the state, or
-                    v = state["v"] # Get the tensor v from the state, or
-                grad = p.grad.data # Get the gradient of loss with respect to p.
-                alpha = lr * ( 1-beta2**(t) )**(1/2) / ( 1-beta1**(t) ) # Compute the adjusted lr at iteration t
-                p.data = p.data -lr * wd * p.data # Apply weight decay
-                m = beta1 * m +(1-beta1) * grad # Update the first moment estimate
-                v = beta2 * v + (1-beta2) *grad**2 # Update the second moment estimate
-                p.data -= alpha *m /( torch.sqrt(v)+ eps) # Update weight tensor in-place.
-
-                state["t"] = t + 1 # Increment iteration number.
-                state["m"] = m # Increment the tensor m
-                state["v"] = v # increment the tensor v
+                    state["t"] = t + 1 # Increment iteration number.
+                    state["m"] = m # Increment the tensor m
+                    state["v"] = v # increment the tensor v
 
         return loss
         
